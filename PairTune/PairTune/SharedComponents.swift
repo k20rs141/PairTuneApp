@@ -60,6 +60,144 @@ struct SyncBadgeView: View {
     }
 }
 
+// MARK: - Sync Wave Badge (V5 Deep redesign)
+// 2本の逆相波がスクロールするピル。speed/amp/color が SyncState で変わる。
+// Claude Design `screens-room.jsx::SyncWave` を SwiftUI に移植。
+
+struct SyncWaveView: View {
+    let state: SyncState
+    /// 上波の色(プライマリ)。playing 時のみ accent を、それ以外は state.color を使う。
+    var primary: Color = .pairtunePrimary
+    /// 下波の色(セカンダリ)。
+    var secondary: Color = .pairtuneSecondary
+
+    /// 状態ごとのウェーブ設定
+    private var config: (speed: Double, amp: CGFloat, color: Color) {
+        switch state {
+        case .idle:         return (0,    0,    Color(hex: "3F3F4A"))
+        case .loading:      return (1.4,  0.5,  .pairtuneSyncWarn)
+        case .playing:      return (2.0,  1.0,  primary)
+        case .paused:       return (0,    0.4,  .pairtuneTextSecondary)
+        case .outOfSync:    return (2.8,  0.7,  .pairtuneSyncWarn)
+        case .disconnected: return (3.5,  0.3,  .pairtuneSyncBad)
+        }
+    }
+
+    var body: some View {
+        let cfg = config
+
+        HStack(spacing: 8) {
+            // miniature waveform
+            SyncWaveCanvas(
+                amp: cfg.amp,
+                speed: cfg.speed,
+                primaryColor: cfg.color,
+                secondaryColor: secondary
+            )
+            .frame(width: 36, height: 18)
+
+            Text(state.labelJa)
+                .font(.system(size: 11))
+                .foregroundColor(cfg.color)
+                .tracking(0.3)
+            Text("· \(state.labelEn)")
+                .font(.system(size: 10))
+                .foregroundColor(cfg.color.opacity(0.5))
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 12)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(cfg.color.opacity(0.08))
+                .overlay(Capsule().stroke(cfg.color.opacity(0.19), lineWidth: 0.5))
+        )
+        .animation(.easeInOut(duration: 0.25), value: state)
+    }
+}
+
+/// SyncWave のキャンバス本体。`TimelineView` で連続的にフェーズを進めるため
+/// アニメーションのスナップが発生しない。
+private struct SyncWaveCanvas: View {
+    let amp: CGFloat        // 0.0 〜 1.0
+    let speed: Double       // 0 のとき静止(直線描画)
+    let primaryColor: Color
+    let secondaryColor: Color
+
+    private let viewW: CGFloat = 36
+    private let viewH: CGFloat = 18
+
+    var body: some View {
+        if speed <= 0 {
+            // 静止状態: 中央に2本の薄い直線
+            Canvas { ctx, size in
+                let mid = size.height / 2
+                var p1 = Path(); p1.move(to: .init(x: 0, y: mid)); p1.addLine(to: .init(x: size.width, y: mid))
+                ctx.stroke(p1, with: .color(primaryColor.opacity(0.6)), lineWidth: 1.6)
+
+                var p2 = Path(); p2.move(to: .init(x: 0, y: mid)); p2.addLine(to: .init(x: size.width, y: mid))
+                ctx.stroke(p2, with: .color(secondaryColor.opacity(0.35)), lineWidth: 1.2)
+            }
+        } else {
+            // 連続アニメ: TimelineView で時刻からフェーズを直接計算
+            let dur1 = 2.0 / speed
+            let dur2 = 2.5 / speed
+            TimelineView(.animation) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let phase1 = CGFloat((t.truncatingRemainder(dividingBy: dur1)) / dur1) * viewW
+                let phase2 = CGFloat((t.truncatingRemainder(dividingBy: dur2)) / dur2) * viewW
+
+                Canvas { ctx, size in
+                    let scaleX = size.width / viewW
+                    let scaleY = size.height / viewH
+                    let mid = (viewH / 2) * scaleY
+                    let aPx = amp * 7 * scaleY    // 振幅 (max ≈ 7px @ scale 1)
+
+                    // 上波(山始まり)
+                    let path1 = waveSegment(yMid: mid, amp: -aPx, scaleX: scaleX, scaleY: scaleY)
+                    ctx.stroke(
+                        path1.applying(.init(translationX: phase1 - viewW * scaleX, y: 0)),
+                        with: .color(primaryColor.opacity(0.9)),
+                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round)
+                    )
+
+                    // 下波(逆相、速度違い)
+                    let path2 = waveSegment(yMid: mid, amp: aPx, scaleX: scaleX, scaleY: scaleY)
+                    ctx.stroke(
+                        path2.applying(.init(translationX: phase2 - viewW * scaleX, y: 0)),
+                        with: .color(secondaryColor.opacity(0.6)),
+                        style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
+                    )
+                }
+            }
+        }
+    }
+
+    /// W=36(viewBox)に 3 サイクルの波形パスを生成
+    private func waveSegment(yMid: CGFloat, amp: CGFloat, scaleX: CGFloat, scaleY: CGFloat) -> Path {
+        var p = Path()
+        let humps: CGFloat = 3
+        let total = viewW * scaleX
+        let half = total / humps
+        p.move(to: .init(x: 0, y: yMid))
+        var x: CGFloat = 0
+        var dir: CGFloat = -1
+        for _ in 0..<Int(humps) {
+            let cx = x + half / 2
+            let cy = yMid + dir * abs(amp)
+            let nx = x + half
+            p.addQuadCurve(to: .init(x: nx, y: yMid), control: .init(x: cx, y: cy))
+            x = nx
+            dir = -dir
+        }
+        // amp の符号で開始方向を反転(下波用)
+        if amp > 0 {
+            return p.applying(.init(scaleX: 1, y: -1).translatedBy(x: 0, y: -yMid * 2))
+        }
+        return p
+    }
+}
+
 // MARK: - Avatar
 
 struct AvatarView: View {
