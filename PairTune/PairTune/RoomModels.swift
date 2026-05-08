@@ -1,5 +1,15 @@
 import Foundation
 
+// ⚠️ DEPRECATED: v0.2 マイルーム単独方式のモデル群。
+// M1 で v0.4 仕様(マイルーム + ペアリング方式)に再構築予定。
+// 詳細: docs/PairTune_Implementation_Guide_v0.4.md §2 / §4
+// 主な変更点:
+//   - Room: room_type {my_room, shared_room} 区別 / current_song_* 詳細 /
+//           host_timestamp_ms / last_action_by/at / pairing_code に再編
+//   - Profile: apple_user_id, pairing_code, active_pair_id,
+//              share_play_history, share_favorites, notify_* を追加
+//   - 新規モデル: PairRelationship, PairRequest, PlayHistoryEntry を Models/ に追加
+
 // MARK: - Room
 
 struct Room: Codable, Identifiable {

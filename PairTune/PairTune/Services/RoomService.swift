@@ -1,6 +1,19 @@
 import Foundation
 import Supabase
 
+// ⚠️ DEPRECATED: v0.2 マイルーム単独方式の RoomService。
+// M1 で v0.4 仕様に再構築予定。
+// 詳細: docs/PairTune_Implementation_Guide_v0.4.md §2 / §6
+// 主な変更点:
+//   - fetchMyRoom() は v0.4 の rooms (room_type='my_room') に合わせて維持
+//   - joinRoom(code:) は廃止 → 新規 PairService.requestPair(targetCode:) に置換
+//     (コード入力は「即 join」ではなく「ペアリング申請」へ意味変更)
+//   - updateCurrentSong() は last-write-wins 用に Room の current_song_* +
+//     last_action_by/at + host_timestamp_ms を一括 UPDATE する形に
+//   - leaveRoom(roomId:isHost:) は room_participants の left_at 更新のみ維持
+//     (ペアリング解消は新規 PairService.endPair() で別経路)
+
+
 enum RoomError: LocalizedError {
     case notFound
     case notAuthenticated

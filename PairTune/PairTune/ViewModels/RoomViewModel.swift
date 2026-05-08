@@ -2,6 +2,17 @@ import Foundation
 import MusicKit
 import Supabase
 
+// ⚠️ DEPRECATED: v0.2 マイルーム単独方式の RoomViewModel。
+// M1〜M5 で v0.4 仕様に再構築予定。
+// 詳細: docs/PairTune_Implementation_Guide_v0.4.md §2 / §7 / §8
+// 主な変更点:
+//   - mode: RoomMode { case solo, shared } を導入
+//     - solo:   ローカル再生のみ、broadcast / presence 不要、my_room_play_history 記録
+//     - shared: 両者対等ホスト、broadcast 双方向、shared_room_play_history 記録
+//   - PlayState に actorUserId を追加し、last-write-wins で競合解決
+//   - ホストオフライン監視ロジックは廃止(Solo モードへの遷移で代替)
+//   - 30秒経過時に HistoryService に再生履歴を記録(M4 / M5)
+
 enum RoomAlert: String, Identifiable {
     case appleMusicNotSubscribed
     case songNotInCatalog
