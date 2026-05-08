@@ -10,8 +10,17 @@ final class AuthViewModel: NSObject {
     var isLoading = false
     var lastError: String?
 
+    /// v0.4 で追加: 自分のプロフィール(サインイン後にロード)
+    var currentProfile: ProfileV4?
+
+    /// v0.4 で追加: ペアリングコード(派生プロパティ、ホーム状態 A 表示用)
+    var pairingCode: String? { currentProfile?.pairingCode }
+
     private var currentNonce: String?
+    /// Apple Sign In credential.user(初回サインインで profiles に永続化するまで保持)
+    private var pendingAppleUserId: String?
     private let supabase = SupabaseManager.shared.client
+    private let roomService = RoomService()
 
     override init() {
         super.init()
@@ -23,6 +32,10 @@ final class AuthViewModel: NSObject {
     func restoreSession() async {
         do {
             session = try await supabase.auth.session
+            // 既存セッションがあればプロフィールも復元
+            if session != nil {
+                await loadProfile()
+            }
         } catch {
             session = nil
         }
@@ -37,9 +50,22 @@ final class AuthViewModel: NSObject {
                 session = newSession
             case .signedOut:
                 session = nil
+                currentProfile = nil
             default:
                 break
             }
+        }
+    }
+
+    // MARK: - Profile loading
+
+    /// プロフィール再読み込み(state A の pairing_code 表示用)。失敗してもクラッシュしない。
+    func loadProfile() async {
+        do {
+            currentProfile = try await roomService.fetchMyProfile()
+        } catch {
+            print("[AuthViewModel] loadProfile error:", error)
+            // lastError には出さない(画面で「------」表示されるだけ)
         }
     }
 
@@ -131,15 +157,34 @@ extension AuthViewModel: ASAuthorizationControllerDelegate {
                 return
             }
 
+            // Apple の安定識別子(同一ユーザーで毎回同じ)を保持。
+            // Supabase 認証成功後に profiles.apple_user_id へ書き込む。
+            pendingAppleUserId = credential.user
+
             do {
                 try await supabase.auth.signInWithIdToken(
                     credentials: .init(provider: .apple, idToken: idToken, nonce: nonce)
                 )
                 // 成功時: session 変化を authStateChanges で観測 → ContentView が画面遷移
+                // ここで apple_user_id 保存 + プロフィール取得を続けて行う。
+                await persistAppleUserIdIfNeeded()
+                await loadProfile()
             } catch {
                 print("[AuthViewModel] Supabase signIn error:", error)
                 lastError = "サインインに失敗しました。もう一度お試しください"
             }
+        }
+    }
+
+    /// `pendingAppleUserId` を `profiles.apple_user_id` に保存。失敗してもサインインフローは続行。
+    private func persistAppleUserIdIfNeeded() async {
+        guard let appleUserId = pendingAppleUserId else { return }
+        do {
+            try await roomService.updateAppleUserId(appleUserId)
+            pendingAppleUserId = nil
+        } catch {
+            print("[AuthViewModel] persistAppleUserId error:", error)
+            // RLS エラー等の可能性があるが致命的ではないので、エラー UI は出さない。
         }
     }
 

@@ -51,69 +51,31 @@ struct ContentView: View {
                 Color.clear.onAppear { screen = .home }
 
             case .home:
+                // v0.4 state A: ペアリング前のホーム。
+                // pairing_code を AuthViewModel から流す。
+                // CTA(コードで参加 / Solo)は HomeView 内で disabled、
+                // M3 で onJoin を PairService 経由に、M4 で onSolo を Solo モード起動に接続予定。
                 HomeView(
-                    onCreate: {
-                        Task {
-                            await homeViewModel.loadMyRoom()
-                            guard let room = homeViewModel.myRoom else { return }
-                            let vm = RoomViewModel(room: room, isHost: true)
-                            roomViewModel = vm
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                screen = .room
-                            }
-                            let userId = authViewModel.session?.user.id.uuidString ?? ""
-                            let name = authViewModel.session?.user.userMetadata["full_name"]?.stringValue
-                            await vm.enterRoom(userId: userId, displayName: name)
-                        }
+                    pairingCode: authViewModel.pairingCode,
+                    onShareCode: {
+                        // M3 で ShareLink 実装予定(現状 disabled)
                     },
                     onJoin: {
-                        showCodeEntry = true
+                        // M3 で showCodeEntry = true → ペアリング申請 (現状 disabled)
+                    },
+                    onSolo: {
+                        // M4 で Solo モード起動(現状 disabled)
                     },
                     onProfile: {
                         showSettings = true
                     }
                 )
                 .transition(.opacity)
-                .sheet(isPresented: $showCodeEntry) {
-                    CodeEntrySheet(
-                        isPresented: $showCodeEntry,
-                        onJoin: {
-                            if let room = joinViewModel.joinedRoom {
-                                let vm = RoomViewModel(room: room, isHost: false)
-                                roomViewModel = vm
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    screen = .room
-                                }
-                                let userId = authViewModel.session?.user.id.uuidString ?? ""
-                                let name = authViewModel.session?.user.userMetadata["full_name"]?.stringValue
-                                Task { await vm.enterRoom(userId: userId, displayName: name) }
-                            }
-                        },
-                        validateCode: { code in
-                            await joinViewModel.joinRoom(code: code)
-                        }
-                    )
-                }
                 .sheet(isPresented: $showSettings) {
                     SettingsSheet(
                         authViewModel: authViewModel,
                         onDismiss: { showSettings = false }
                     )
-                }
-                .alert(
-                    homeViewModel.lastError ?? "",
-                    isPresented: Binding(
-                        get: { homeViewModel.lastError != nil },
-                        set: { if !$0 { homeViewModel.lastError = nil } }
-                    )
-                ) {
-                    Button("リトライ") {
-                        homeViewModel.lastError = nil
-                        Task { await homeViewModel.reloadMyRoom() }
-                    }
-                    Button("キャンセル", role: .cancel) {
-                        homeViewModel.lastError = nil
-                    }
                 }
 
             case .room:
@@ -140,10 +102,9 @@ struct ContentView: View {
         .onAppear {
             if screen == .signIn { screen = .home }
         }
-        .task(id: authViewModel.session?.user.id) {
-            guard authViewModel.session != nil else { return }
-            await homeViewModel.loadMyRoom()
-        }
+        // M2: マイルームの先読みは行わない(M4 で Solo モード起動時に loadMyRoom する)。
+        // 起動時のセッション復元時にプロフィールだけは AuthViewModel.restoreSession() が
+        // 自動でロードする。
     }
 }
 

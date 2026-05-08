@@ -3,21 +3,25 @@ import Foundation
 @Observable
 @MainActor
 final class HomeViewModel {
-    var myRoom: Room?
+    /// v0.4: マイルーム(必要になった時のみロード)
+    /// 状態 A(ペアリング前)では未使用。M4(Solo モード起動時)で本格的に使う。
+    var myRoom: RoomV4?
+
     var isLoading = false
     var lastError: String?
 
     private let roomService = RoomService()
 
-    // MARK: - マイルームを取得 (起動時・ボタンタップ時に呼ぶ)
+    // MARK: - マイルームを取得
 
+    /// M4 で Solo モードに入るときに呼ぶ想定。M2 段階では ContentView から呼ばない。
     func loadMyRoom() async {
         guard myRoom == nil else { return } // キャッシュ済みならスキップ
         isLoading = true
         lastError = nil
         defer { isLoading = false }
         do {
-            myRoom = try await roomService.fetchMyRoom()
+            myRoom = try await roomService.fetchMyRoomV4()
         } catch let roomErr as RoomError {
             switch roomErr {
             case .notAuthenticated:

@@ -1,23 +1,17 @@
 import Foundation
 import Supabase
 
-// ⚠️ DEPRECATED: v0.2 マイルーム単独方式の RoomService。
-// M1 で v0.4 仕様に再構築予定。
-// 詳細: docs/PairTune_Implementation_Guide_v0.4.md §2 / §6
-// 主な変更点:
-//   - fetchMyRoom() は v0.4 の rooms (room_type='my_room') に合わせて維持
-//   - joinRoom(code:) は廃止 → 新規 PairService.requestPair(targetCode:) に置換
-//     (コード入力は「即 join」ではなく「ペアリング申請」へ意味変更)
-//   - updateCurrentSong() は last-write-wins 用に Room の current_song_* +
-//     last_action_by/at + host_timestamp_ms を一括 UPDATE する形に
-//   - leaveRoom(roomId:isHost:) は room_participants の left_at 更新のみ維持
-//     (ペアリング解消は新規 PairService.endPair() で別経路)
-
+// v0.2 (Beside) → v0.4 (PairTune) 移行中。
+// M2 で v0.4 用 API (fetchMyProfile / fetchMyRoomV4 / updateAppleUserId) を追加。
+// 旧 v0.2 API (fetchMyRoom / joinRoom) は @available(deprecated) でマーキングし、
+// 既存呼び出し元のコンパイル維持のためスタブだけ残す(v0.4 schema 適用後は実行不可)。
+// 詳細: docs/PairTune_Implementation_Guide_v0.4.md §2 / §5 / §6
 
 enum RoomError: LocalizedError {
     case notFound
     case notAuthenticated
     case ownRoom
+    case schemaIncompatible    // v0.2 API を v0.4 schema に対して呼んだ時
     case unknown(Error)
 
     var errorDescription: String? {
@@ -28,6 +22,8 @@ enum RoomError: LocalizedError {
             return "サインインが必要です"
         case .ownRoom:
             return "これはあなた自身のルームです"
+        case .schemaIncompatible:
+            return "このフローは v0.4 で廃止されました"
         case .unknown(let err):
             return err.localizedDescription
         }
@@ -37,86 +33,85 @@ enum RoomError: LocalizedError {
 final class RoomService {
     private let client = SupabaseManager.shared.client
 
-    // MARK: - fetchMyRoom
+    // =========================================================================
+    // MARK: - v0.4 API
+    // =========================================================================
 
-    /// 自分のマイルームを返す。my_room_id 未設定の場合は ensure_my_room() RPC で作成する。
-    func fetchMyRoom() async throws -> Room {
+    /// 自分のプロフィール(v0.4 schema)。サインイン直後に取得して `AuthViewModel` が保持する。
+    func fetchMyProfile() async throws -> ProfileV4 {
         guard let userId = try? await client.auth.session.user.id else {
             throw RoomError.notAuthenticated
         }
-
-        // プロフィールから my_room_id を取得
-        let profiles: [Profile] = try await client
+        let profiles: [ProfileV4] = try await client
             .from("profiles")
             .select()
             .eq("id", value: userId.uuidString)
             .limit(1)
             .execute()
             .value
-
-        if let myRoomId = profiles.first?.myRoomId {
-            let rooms: [Room] = try await client
-                .from("rooms")
-                .select()
-                .eq("id", value: myRoomId)
-                .limit(1)
-                .execute()
-                .value
-            if let room = rooms.first {
-                return room
-            }
+        guard let profile = profiles.first else {
+            throw RoomError.notFound
         }
-
-        // my_room_id 未設定 (既存ユーザーなど) → RPC で作成・設定
-        let room: Room = try await client
-            .rpc("ensure_my_room")
-            .execute()
-            .value
-        return room
+        return profile
     }
 
-    // MARK: - joinRoom
-
-    /// 他ユーザーのルームにコードで参加する。自分のコードはエラー。
-    func joinRoom(code: String) async throws -> Room {
-        guard let userId = try? await client.auth.session.user.id else {
-            throw RoomError.notAuthenticated
+    /// 自分のマイルーム(v0.4 schema、`room_type = 'my_room'`)。
+    /// `handle_new_user()` トリガで profile 作成時に my_room も自動生成済み。
+    func fetchMyRoomV4() async throws -> RoomV4 {
+        let profile = try await fetchMyProfile()
+        guard let myRoomId = profile.myRoomId else {
+            throw RoomError.notFound
         }
-
-        let rooms: [Room] = try await client
+        let rooms: [RoomV4] = try await client
             .from("rooms")
             .select()
-            .eq("code", value: code.uppercased())
-            .eq("is_active", value: true)
+            .eq("id", value: myRoomId)
             .limit(1)
             .execute()
             .value
-
         guard let room = rooms.first else {
             throw RoomError.notFound
         }
-
-        // 自分のマイルームのコードを入力した場合
-        if room.hostId == userId.uuidString {
-            throw RoomError.ownRoom
-        }
-
-        // 既に参加済みの場合は重複を無視して upsert
-        try await client
-            .from("room_participants")
-            .upsert(
-                ["room_id": room.id, "user_id": userId.uuidString],
-                onConflict: "room_id,user_id",
-                ignoreDuplicates: true
-            )
-            .execute()
-
         return room
     }
 
-    // MARK: - updateCurrentSong
+    /// Apple Sign In の `credential.user`(安定識別子)を `profiles.apple_user_id` に保存。
+    /// 初回サインイン後に 1 回だけ実質的に書き込まれる(以降は同値で idempotent)。
+    func updateAppleUserId(_ appleUserId: String) async throws {
+        guard let userId = try? await client.auth.session.user.id else {
+            throw RoomError.notAuthenticated
+        }
+        try await client
+            .from("profiles")
+            .update(["apple_user_id": appleUserId])
+            .eq("id", value: userId.uuidString)
+            .execute()
+    }
 
-    /// ホストが選曲した曲の ID を DB に保存する (ゲスト後入室時の初期化用)
+    // =========================================================================
+    // MARK: - v0.2 API (DEPRECATED)
+    // =========================================================================
+    // 既存コード(HomeViewModel.loadMyRoom 等)のコンパイルを維持するためスタブを残す。
+    // v0.4 schema では `rooms.code` / `rooms.host_id` / `rooms.is_active` カラムが
+    // 存在しないため、これらは実行すると常に schemaIncompatible を throw する。
+    // 各呼び出し元は順次 v0.4 API へ移行する。
+
+    @available(*, deprecated, message: "v0.4 では fetchMyRoomV4() を使う。v0.2 schema は廃止された。")
+    func fetchMyRoom() async throws -> Room {
+        throw RoomError.schemaIncompatible
+    }
+
+    @available(*, deprecated, message: "v0.4 ではコード入力 → ペアリング申請。M3 で PairService.requestPair() に置換予定。")
+    func joinRoom(code: String) async throws -> Room {
+        throw RoomError.schemaIncompatible
+    }
+
+    // =========================================================================
+    // MARK: - 共通(維持)
+    // =========================================================================
+
+    /// 曲情報の DB 永続化(遅延参加ゲスト用)。
+    /// M5(Shared モード)で last-write-wins 用に大幅拡張予定。
     func updateCurrentSong(roomId: String, songId: String) async throws {
         try await client
             .from("rooms")
@@ -125,31 +120,21 @@ final class RoomService {
             .execute()
     }
 
-    // MARK: - deleteAccount
-
-    /// 自分のアカウント(auth.users)を削除する。
-    /// profiles の cascade により rooms / room_participants も連鎖削除される。
+    /// アカウント削除。v0.2 では `delete_my_account` RPC を使っていたが、v0.4 schema には
+    /// 同 RPC を含めていない。M8 仕上げ時に再設計する想定。
+    /// 暫定: schemaIncompatible を throw。SettingsSheet 側で alert 表示 → "M8 で対応予定" と案内。
     func deleteAccount() async throws {
-        try await client.rpc("delete_my_account").execute()
+        throw RoomError.schemaIncompatible
     }
 
-    // MARK: - leaveRoom
-
-    /// ホスト(マイルーム)退出: ルームは永続化するため DB 変更なし。
-    /// ゲスト退出: room_participants.left_at を更新。
+    /// shared_room から退出(M5 で本格対応、M2 段階では呼ばれない想定)
     func leaveRoom(roomId: String, isHost: Bool) async throws {
-        if isHost {
-            // マイルームは永続 — ホームに戻るだけで DB は触らない
-            return
-        }
-
+        if isHost { return }
         guard let userId = try? await client.auth.session.user.id else {
             throw RoomError.notAuthenticated
         }
-
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
         try await client
             .from("room_participants")
             .update(["left_at": iso.string(from: Date())])
