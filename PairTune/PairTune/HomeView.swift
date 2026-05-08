@@ -58,9 +58,9 @@ struct HomeView: View {
 
                 // Hero
                 VStack(spacing: 0) {
-                    PairTuneLogoView(size: 120, color: .pairtuneCoral, glow: true)
+                    PairTuneLogoView(size: 220, glow: true)
 
-                    Text("通話せずに、\n同じ曲を、あの人と。")
+                    Text("離れていても、\n同じ音を。")
                         .font(.system(size: 22, weight: .medium))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
@@ -68,7 +68,7 @@ struct HomeView: View {
                         .tracking(0.2)
                         .padding(.top, 28)
 
-                    Text("Listen together — without picking up the phone.")
+                    Text("Tune in, side by side — without a call.")
                         .font(.system(size: 12.5))
                         .foregroundColor(.pairtuneTextTertiary)
                         .tracking(0.6)

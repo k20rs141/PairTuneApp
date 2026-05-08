@@ -74,8 +74,8 @@ struct RoomView: View {
                                 .padding(.horizontal, 28)
                         }
 
-                        // Sync badge
-                        SyncBadgeView(state: syncState, accent: .pairtuneCoral)
+                        // Sync wave (V5 Deep redesign)
+                        SyncWaveView(state: syncState, primary: .pairtunePrimary, secondary: .pairtuneSecondary)
                             .padding(.top, 18)
 
                         Spacer()
