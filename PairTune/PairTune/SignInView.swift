@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct SignInView: View {
+    /// 進行中フラグ(AuthViewModel.isLoading から流す)。失敗時は呼び出し側で false に戻る。
+    var isProcessing: Bool = false
     var onSignIn: () -> Void
-    @State private var busy = false
+    @State private var logoAnimKey: Int = 0
 
     var body: some View {
         ZStack {
@@ -23,21 +25,22 @@ struct SignInView: View {
 
                 // Logo + wordmark + tagline
                 VStack(spacing: 0) {
-                    PairTuneLogoView(size: 92, color: .pairtuneCoral, glow: true)
-                        .opacity(busy ? 0.6 : 1)
-                        .animation(.easeInOut(duration: 0.3), value: busy)
+                    PairTuneLogoView(size: 200, glow: true, animate: true, animKey: logoAnimKey)
+                        .opacity(isProcessing ? 0.6 : 1)
+                        .animation(.easeInOut(duration: 0.3), value: isProcessing)
+                        .onTapGesture { logoAnimKey += 1 }
 
-                    PairTuneWordmark(size: 42)
+                    PairTuneWordmark(size: 38)
                         .padding(.top, 20)
 
                     VStack(spacing: 6) {
-                        Text("通話せずに、同じ曲を、あの人と。")
+                        Text("離れていても、同じ音を。")
                             .font(.system(size: 14))
                             .foregroundColor(.pairtuneTextSecondary)
                             .multilineTextAlignment(.center)
                             .tracking(0.4)
 
-                        Text("The same song, beside someone — without a call.")
+                        Text("The same song, together — without a call.")
                             .font(.system(size: 11.5))
                             .foregroundColor(.pairtuneTextTertiary)
                             .tracking(0.6)
@@ -51,14 +54,11 @@ struct SignInView: View {
                 // Bottom section
                 VStack(spacing: 18) {
                     Button {
-                        guard !busy else { return }
-                        busy = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) {
-                            onSignIn()
-                        }
+                        guard !isProcessing else { return }
+                        onSignIn()
                     } label: {
                         HStack(spacing: 8) {
-                            if busy {
+                            if isProcessing {
                                 SpinnerView(color: .black, size: 17)
                             } else {
                                 Image(systemName: "apple.logo")
@@ -73,10 +73,10 @@ struct SignInView: View {
                         .background(Color.white)
                         .cornerRadius(14)
                         .shadow(color: Color.white.opacity(0.08), radius: 16, y: 4)
-                        .opacity(busy ? 0.6 : 1)
+                        .opacity(isProcessing ? 0.6 : 1)
                     }
-                    .disabled(busy)
-                    .animation(.easeInOut(duration: 0.2), value: busy)
+                    .disabled(isProcessing)
+                    .animation(.easeInOut(duration: 0.2), value: isProcessing)
 
                     HStack(spacing: 4) {
                         Text("続行することで")

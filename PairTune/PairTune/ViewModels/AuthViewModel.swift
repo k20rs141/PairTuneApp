@@ -50,7 +50,8 @@ final class AuthViewModel: NSObject {
         currentNonce = nonce
         isLoading = true
         lastError = nil
-        defer { isLoading = false }
+        // NOTE: isLoading は performRequests() 後の async コールバックで完了するため、
+        //       ここで defer リセットせず delegate メソッド側で false にする。
 
         let request = ASAuthorizationAppleIDProvider().createRequest()
         request.requestedScopes = [.fullName, .email]
@@ -118,6 +119,7 @@ extension AuthViewModel: ASAuthorizationControllerDelegate {
         didCompleteWithAuthorization authorization: ASAuthorization
     ) {
         Task { @MainActor in
+            defer { isLoading = false }
             guard
                 let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
                 let tokenData = credential.identityToken,
@@ -133,6 +135,7 @@ extension AuthViewModel: ASAuthorizationControllerDelegate {
                 try await supabase.auth.signInWithIdToken(
                     credentials: .init(provider: .apple, idToken: idToken, nonce: nonce)
                 )
+                // 成功時: session 変化を authStateChanges で観測 → ContentView が画面遷移
             } catch {
                 print("[AuthViewModel] Supabase signIn error:", error)
                 lastError = "サインインに失敗しました。もう一度お試しください"
@@ -148,6 +151,7 @@ extension AuthViewModel: ASAuthorizationControllerDelegate {
         let isCancel = (nsErr.domain == ASAuthorizationError.errorDomain
             && nsErr.code == ASAuthorizationError.canceled.rawValue)
         Task { @MainActor in
+            isLoading = false
             if !isCancel {
                 print("[AuthViewModel] Apple auth error:", error)
                 lastError = "認証に失敗しました"

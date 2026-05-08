@@ -16,7 +16,7 @@ struct ContentView: View {
         @Bindable var auth = authViewModel
         ZStack {
             if authViewModel.session == nil {
-                SignInView {
+                SignInView(isProcessing: authViewModel.isLoading) {
                     Task { await authViewModel.signInWithApple() }
                 }
                 .transition(.opacity)
