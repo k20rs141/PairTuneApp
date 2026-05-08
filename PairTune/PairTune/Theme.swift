@@ -1,16 +1,20 @@
 import SwiftUI
 
 extension Color {
-    // Base palette
-    static let pairtuneBase          = Color(hex: "0A0A0A")
-    static let pairtuneSurface       = Color(hex: "141414")
-    static let pairtuneSurfaceSheet  = Color(hex: "1A1A1A")
-    static let pairtuneSurfaceHi     = Color(hex: "1C1C1C")
-    static let pairtuneHairline      = Color(hex: "262626")
+    // Base palette — V5 Deep (Lavender Dream)
+    static let pairtuneBase          = Color(hex: "0C0818")
+    static let pairtuneSurface       = Color(hex: "16112A")
+    static let pairtuneSurfaceSheet  = Color(hex: "16112A")
+    static let pairtuneSurfaceHi     = Color(hex: "1E1836")
+    static let pairtuneHairline      = Color(hex: "262238")
 
-    // Accent
-    static let pairtuneCoral  = Color(hex: "FF5A6E")
-    static let pairtuneCream  = Color(hex: "F5E8D0")
+    // Accent — V5 Deep
+    static let pairtunePrimary    = Color(hex: "9B7BFF")  // lavender violet
+    static let pairtuneSecondary  = Color(hex: "FF6B9D")  // pink
+
+    // Backwards-compat aliases (旧 V1 命名で参照しているコード用)
+    static let pairtuneCoral  = Color(hex: "9B7BFF")
+    static let pairtuneCream  = Color(hex: "FF6B9D")
 
     // Text
     static let pairtuneTextPrimary    = Color.white
