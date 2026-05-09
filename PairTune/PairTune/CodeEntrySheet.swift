@@ -1,15 +1,29 @@
 import SwiftUI
 
+// MARK: - CodeEntrySheet (v0.4 ペアリング申請)
+//
+// v0.2 では「他人のマイルームに参加する」ためのコード入力だったが、
+// v0.4 では「パートナーのコードを入力 → ペアリング申請を送る」フローに変わった。
+// 仕様: docs/PairTune_Specification_v0.4.md §5.3 / §6
+// 実装ガイド: docs/PairTune_Implementation_Guide_v0.4.md §6
+//
+// レイアウト(ピン入力/ペーストヒント等)は Claude Design 由来のため変更しない。
+// 変更はコピー文言と submit ハンドラのセマンティクスのみ。
+
 struct CodeEntrySheet: View {
     @Binding var isPresented: Bool
-    var onJoin: () -> Void
-    /// 本番バリデーション closure。nil のときはモックで動作 (Preview 用)。
-    /// 引数: 入力コード、戻り値: エラーメッセージ or nil (成功)
-    var validateCode: ((String) async -> String?)? = nil
+
+    /// コード入力完了時の送信ハンドラ。
+    /// nil の場合はモック動作(Preview / デザイン確認用)。
+    /// 戻り値: エラーメッセージ(成功時 nil)
+    var submitCode: ((String) async -> String?)? = nil
+
+    /// 申請が DB に INSERT 成功した直後に呼ばれる(sheet 閉じた後)
+    var onRequested: () -> Void = {}
 
     @State private var code: String = ""
     @State private var errorMessage: String? = nil
-    @State private var isValidating: Bool = false
+    @State private var isSubmitting: Bool = false
     @FocusState private var isInputFocused: Bool
 
     private let allowed = CharacterSet(charactersIn: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
@@ -27,12 +41,12 @@ struct CodeEntrySheet: View {
                     .padding(.bottom, 22)
 
                 // Title
-                Text("コードを入力")
+                Text("パートナーのコードを入力")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.white)
                     .tracking(0.3)
 
-                Text("Enter the 6-letter code")
+                Text("Enter your partner's 6-letter code")
                     .font(.system(size: 12.5))
                     .foregroundColor(.pairtuneTextTertiary)
                     .tracking(0.4)
@@ -58,8 +72,8 @@ struct CodeEntrySheet: View {
                             )
                             if filtered != newVal { code = filtered }
                             errorMessage = nil
-                            if filtered.count == 6 && !isValidating {
-                                validate(filtered)
+                            if filtered.count == 6 && !isSubmitting {
+                                submit(filtered)
                             }
                         }
 
@@ -98,10 +112,10 @@ struct CodeEntrySheet: View {
 
                 // Error / hint line
                 Group {
-                    if isValidating {
+                    if isSubmitting {
                         HStack(spacing: 6) {
                             SpinnerView(color: .pairtuneTextTertiary, size: 12)
-                            Text("確認中…")
+                            Text("申請を送信中…")
                         }
                     } else if let err = errorMessage {
                         Text(err)
@@ -117,10 +131,10 @@ struct CodeEntrySheet: View {
                 .frame(height: 20)
                 .padding(.top, 14)
 
-                // Paste hint
+                // Paste hint (Preview/デザイン確認用、実機ではクリップボード貼り付け)
                 Button {
                     code = mockCode
-                    validate(mockCode)
+                    submit(mockCode)
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "doc.on.clipboard")
@@ -142,7 +156,7 @@ struct CodeEntrySheet: View {
 
                 Spacer()
 
-                Text("1文字入力ごとに haptic feedback · Auto-advances on input")
+                Text("申請が届くと相手の画面で承認モーダルが開きます")
                     .font(.system(size: 11))
                     .foregroundColor(.pairtuneTextQuaternary)
                     .tracking(0.4)
@@ -156,35 +170,35 @@ struct CodeEntrySheet: View {
         .onAppear {
             code = ""
             errorMessage = nil
-            isValidating = false
+            isSubmitting = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
                 isInputFocused = true
             }
         }
     }
 
-    private func validate(_ full: String) {
-        isValidating = true
-        if let asyncValidate = validateCode {
+    private func submit(_ full: String) {
+        isSubmitting = true
+        if let asyncSubmit = submitCode {
             Task {
-                let errMsg = await asyncValidate(full)
-                isValidating = false
+                let errMsg = await asyncSubmit(full)
+                isSubmitting = false
                 if errMsg == nil {
                     isPresented = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onJoin() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onRequested() }
                 } else {
                     errorMessage = errMsg
                 }
             }
         } else {
-            // モックバリデーション (Preview / デザイン確認用)
+            // モック動作 (Preview 用)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                isValidating = false
+                isSubmitting = false
                 if full == mockCode {
                     isPresented = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onJoin() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onRequested() }
                 } else {
-                    errorMessage = "コードが正しくないか、ルームが終了しています"
+                    errorMessage = "コードが正しくありません"
                 }
             }
         }

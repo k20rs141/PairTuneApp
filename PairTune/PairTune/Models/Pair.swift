@@ -39,9 +39,11 @@ struct PairRelationship: Codable, Identifiable {
     }
 
     /// 自分から見た相手の user_id を返す。ペアの当事者でない場合は nil。
+    /// PostgreSQL は UUID を小文字で返す一方、Foundation の `UUID.uuidString` は
+    /// 大文字を返すため、大小文字を無視して比較する。
     func partnerUserId(meId: String) -> String? {
-        if userAId == meId { return userBId }
-        if userBId == meId { return userAId }
+        if userAId.caseInsensitiveCompare(meId) == .orderedSame { return userBId }
+        if userBId.caseInsensitiveCompare(meId) == .orderedSame { return userAId }
         return nil
     }
 }
