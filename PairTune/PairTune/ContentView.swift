@@ -103,7 +103,15 @@ struct ContentView: View {
                         // M5 (Shared モード) で実装。現状ボタン自体 disabled。
                     },
                     onSolo: {
-                        // M4 で Solo モード起動
+                        Task {
+                            await homeViewModel.loadMyRoom()
+                            guard let myRoom = homeViewModel.myRoom else { return }
+                            let vm = RoomViewModel(myRoom: myRoom)
+                            roomViewModel = vm
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                screen = .room
+                            }
+                        }
                     },
                     onProfile: {
                         showSettings = true
@@ -466,6 +474,11 @@ private struct RoomViewWrapper: View {
             onExit: onExit,
             onSelectTrack: { _ in }
         )
+        .task {
+            let userId = authViewModel.session?.user.id.uuidString ?? ""
+            let name = authViewModel.session?.user.userMetadata["full_name"]?.stringValue
+            await roomViewModel.enterRoom(userId: userId, displayName: name)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 let userId = authViewModel.session?.user.id.uuidString ?? ""

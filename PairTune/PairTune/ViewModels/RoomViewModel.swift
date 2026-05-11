@@ -2,16 +2,14 @@ import Foundation
 import MusicKit
 import Supabase
 
-// ⚠️ DEPRECATED: v0.2 マイルーム単独方式の RoomViewModel。
-// M1〜M5 で v0.4 仕様に再構築予定。
-// 詳細: docs/PairTune_Implementation_Guide_v0.4.md §2 / §7 / §8
-// 主な変更点:
-//   - mode: RoomMode { case solo, shared } を導入
-//     - solo:   ローカル再生のみ、broadcast / presence 不要、my_room_play_history 記録
-//     - shared: 両者対等ホスト、broadcast 双方向、shared_room_play_history 記録
-//   - PlayState に actorUserId を追加し、last-write-wins で競合解決
-//   - ホストオフライン監視ロジックは廃止(Solo モードへの遷移で代替)
-//   - 30秒経過時に HistoryService に再生履歴を記録(M4 / M5)
+// M4: Solo モード(ローカル再生 + my_room_play_history 記録)を追加。
+// 既存の Shared(v0.2)は mode == .shared として維持し、M5 で両者対等ホストに昇格。
+// 仕様: docs/PairTune_Specification_v0.4.md §7
+// 実装ガイド: docs/PairTune_Implementation_Guide_v0.4.md §7
+
+// MARK: - RoomMode
+
+enum RoomMode { case solo, shared }
 
 enum RoomAlert: String, Identifiable {
     case appleMusicNotSubscribed
@@ -56,6 +54,10 @@ final class RoomViewModel {
 
     let currentRoom: Room
     let isHost: Bool
+    let mode: RoomMode
+
+    // Solo モード用: 履歴記録に使う userId(enterRoom 時に設定)
+    private var soloUserId: String = ""
 
     // MARK: - Display state (RoomView が読む)
 
@@ -84,6 +86,7 @@ final class RoomViewModel {
 
     let musicService = MusicPlayerService()
     private let roomService = RoomService()
+    private let historyService = HistoryService()
 
     // MARK: - Internal
 
@@ -92,19 +95,49 @@ final class RoomViewModel {
     private var stateListenerTask: Task<Void, Never>?
     private var eventListenerTask: Task<Void, Never>?
 
+    // Solo モード用: 30秒履歴タイマー
+    private var historyTimerTask: Task<Void, Never>?
+
     // デバッグ用
     var debugLastDriftMs: Double = 0
     var debugLastSeq: Int = 0
 
+    // MARK: - Init (Shared モード — v0.2 互換)
+
     init(room: Room, isHost: Bool) {
         self.currentRoom = room
         self.isHost = isHost
+        self.mode = .shared
+    }
+
+    // MARK: - Init (Solo モード — M4)
+
+    /// マイルーム(RoomV4)から Solo モードの RoomViewModel を作る。
+    /// RoomView は `currentRoom.code` を参照するため、pairingCode を code として使う adapter を作る。
+    init(myRoom: RoomV4) {
+        let adapterRoom = Room(
+            id: myRoom.id,
+            code: myRoom.pairingCode ?? String(myRoom.id.prefix(6)).uppercased(),
+            hostId: "",
+            isActive: true,
+            currentSongId: myRoom.currentSongId,
+            createdAt: myRoom.createdAt
+        )
+        self.currentRoom = adapterRoom
+        self.isHost = true
+        self.mode = .solo
     }
 
     // MARK: - Lifecycle
 
     func enterRoom(userId: String, displayName: String?) async {
         _ = await musicService.requestAuthorization()
+
+        // Solo モード: Realtime 接続は不要、userId だけ保持して終わり
+        if mode == .solo {
+            soloUserId = userId
+            return
+        }
 
         startConnectionObserver()
 
@@ -126,6 +159,9 @@ final class RoomViewModel {
     }
 
     func reconnect(userId: String, displayName: String?) async {
+        // Solo モード: 再接続は不要
+        if mode == .solo { return }
+
         await channelManager.reconnect(
             roomCode: currentRoom.code,
             userId: userId,
@@ -140,19 +176,26 @@ final class RoomViewModel {
     }
 
     func leaveRoom() async {
+        historyTimerTask?.cancel()
+        musicService.stop()
+
+        // Solo モード: Realtime/DB 操作は不要
+        if mode == .solo { return }
+
         hostBroadcastTask?.cancel()
         stateListenerTask?.cancel()
         eventListenerTask?.cancel()
         connectionObserverTask?.cancel()
         hostWatchTask?.cancel()
-        musicService.stop()
         await channelManager.disconnect()
         try? await roomService.leaveRoom(roomId: currentRoom.id, isHost: isHost)
     }
 
     /// 接続失敗アラートのリトライボタンから呼ぶ。
-    /// 再接続後に listener を貼り直す必要があるので、enterRoom 後半と同じ手順を再実行する。
     func retryConnection() async {
+        // Solo モード: Realtime は使わないためリトライ不要
+        if mode == .solo { return }
+
         await channelManager.retryFromFailure()
         guard case .connected = channelManager.connectionState else { return }
         if isHost {
@@ -179,26 +222,27 @@ final class RoomViewModel {
         isPaused = false
 
         do {
-            // SearchSheet が返す Track.id は Apple Music の song ID なのでそのまま使う。
-            // (title+artist で再検索すると同名曲・特殊文字で稀に外れて songNotInCatalog になっていた)
             let songId = track.id
             activeSongId = songId
             try await musicService.load(songId: songId, at: 0)
 
-            // MusicKit Song で Track を上書き (duration を実データに更新)
+            // MusicKit Song で Track を上書き(duration を実データに更新)
             if let song = musicService.currentSong {
                 currentTrack = song.toTrack()
             }
 
             syncState = .playing
 
-            // DB に current_song_id を保存 (遅延参加ゲスト用)
-            try? await roomService.updateCurrentSong(roomId: currentRoom.id, songId: songId)
-
-            // PlayEvent を即時2連投
-            let event = PlayEvent(type: .play, songId: songId, playbackTime: musicService.currentTime())
-            await channelManager.broadcast(event: "play_event", message: event)
-            await channelManager.broadcast(event: "play_event", message: event)
+            if mode == .solo {
+                // Solo: Realtime なし。30秒タイマーをリスタートして履歴記録を予約。
+                startHistoryTimer(for: currentTrack ?? track)
+            } else {
+                // Shared: DB に保存して PlayEvent を 2 連投
+                try? await roomService.updateCurrentSong(roomId: currentRoom.id, songId: songId)
+                let event = PlayEvent(type: .play, songId: songId, playbackTime: musicService.currentTime())
+                await channelManager.broadcast(event: "play_event", message: event)
+                await channelManager.broadcast(event: "play_event", message: event)
+            }
 
         } catch {
             print("[RoomViewModel] playAsHost error:", error)
@@ -214,9 +258,11 @@ final class RoomViewModel {
             musicService.pause()
             isPaused = true
             syncState = .paused
-            let event = PlayEvent(type: .pause, songId: activeSongId, playbackTime: musicService.currentTime())
-            await channelManager.broadcast(event: "play_event", message: event)
-            await channelManager.broadcast(event: "play_event", message: event)
+            if mode == .shared {
+                let event = PlayEvent(type: .pause, songId: activeSongId, playbackTime: musicService.currentTime())
+                await channelManager.broadcast(event: "play_event", message: event)
+                await channelManager.broadcast(event: "play_event", message: event)
+            }
         } else {
             do {
                 try await musicService.play()
@@ -227,9 +273,23 @@ final class RoomViewModel {
             }
             isPaused = false
             syncState = .playing
-            let event = PlayEvent(type: .play, songId: activeSongId, playbackTime: musicService.currentTime())
-            await channelManager.broadcast(event: "play_event", message: event)
-            await channelManager.broadcast(event: "play_event", message: event)
+            if mode == .shared {
+                let event = PlayEvent(type: .play, songId: activeSongId, playbackTime: musicService.currentTime())
+                await channelManager.broadcast(event: "play_event", message: event)
+                await channelManager.broadcast(event: "play_event", message: event)
+            }
+        }
+    }
+
+    // MARK: - Solo: 30秒履歴タイマー
+
+    /// 曲が変わるたびにリスタートし、30秒経過したら my_room_play_history に記録する。
+    private func startHistoryTimer(for track: Track) {
+        historyTimerTask?.cancel()
+        historyTimerTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled else { return }
+            await self.historyService.recordSoloPlay(track, userId: self.soloUserId, duration: 30)
         }
     }
 

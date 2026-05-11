@@ -352,8 +352,6 @@ struct HomeView: View {
                     )
             )
         }
-        .disabled(true)        // M4 (Solo モード) で実装
-        .opacity(0.55)
     }
 }
 
