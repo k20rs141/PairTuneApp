@@ -90,6 +90,28 @@ final class RoomService {
         return room
     }
 
+    /// プライバシー設定を保存する(M6: share_play_history / share_favorites)。
+    func updatePrivacySettings(sharePlayHistory: Bool, shareFavorites: Bool) async throws {
+        guard let userId = try? await client.auth.session.user.id else {
+            throw RoomError.notAuthenticated
+        }
+
+        struct PrivacyUpdate: Encodable {
+            let sharePlayHistory: Bool
+            let shareFavorites: Bool
+            enum CodingKeys: String, CodingKey {
+                case sharePlayHistory = "share_play_history"
+                case shareFavorites   = "share_favorites"
+            }
+        }
+
+        try await client
+            .from("profiles")
+            .update(PrivacyUpdate(sharePlayHistory: sharePlayHistory, shareFavorites: shareFavorites))
+            .eq("id", value: userId.uuidString)
+            .execute()
+    }
+
     /// Apple Sign In の `credential.user`(安定識別子)を `profiles.apple_user_id` に保存。
     /// 初回サインイン後に 1 回だけ実質的に書き込まれる(以降は同値で idempotent)。
     func updateAppleUserId(_ appleUserId: String) async throws {

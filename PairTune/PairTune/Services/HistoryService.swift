@@ -91,6 +91,8 @@ final class HistoryService {
     // MARK: - Shared (M5 で使用)
 
     /// shared_room_play_history に記録する。
+    /// 両端末がほぼ同時に INSERT するため、同一 pair × song の直近 60 秒以内の記録が
+    /// 既にある場合はスキップして二重登録を防ぐ。
     func recordSharedPlay(
         _ track: Track,
         duration: Int,
@@ -99,6 +101,21 @@ final class HistoryService {
     ) async {
         guard duration >= 30 else { return }
         do {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let cutoff = iso.string(from: Date().addingTimeInterval(-60))
+
+            let recent: [PlayHistoryEntry] = try await client
+                .from("shared_room_play_history")
+                .select("id,song_id")
+                .eq("pair_id", value: pairId)
+                .eq("song_id", value: track.id)
+                .gte("played_at", value: cutoff)
+                .limit(1)
+                .execute()
+                .value
+            if !recent.isEmpty { return }
+
             let payload = SharedPlayInsert(
                 sharedRoomId: sharedRoomId,
                 pairId: pairId,

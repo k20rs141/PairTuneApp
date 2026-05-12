@@ -170,6 +170,7 @@ struct ContentView: View {
                     RoomViewWrapper(
                         roomViewModel: vm,
                         authViewModel: authViewModel,
+                        pairViewModel: pairViewModel,
                         onExit: {
                             let leavingVM = vm
                             roomViewModel = nil
@@ -214,6 +215,10 @@ private struct SettingsSheet: View {
     @State private var showEndPairConfirm = false
     @State private var isEndingPair = false
     @State private var preserveMemoriesChoice = true
+
+    // M6: プライバシー設定トグル(currentProfile からの初期値は .task で設定)
+    @State private var sharePlayHistory = false
+    @State private var shareFavorites = true
 
     var body: some View {
         NavigationStack {
@@ -307,6 +312,49 @@ private struct SettingsSheet: View {
                         .padding(.top, 12)
                     }
 
+                    // M6: プライバシー設定(ペアリング済みの場合のみ表示)
+                    if pairViewModel.activePair != nil {
+                        VStack(spacing: 0) {
+                            privacyToggleRow(
+                                title: "再生履歴をパートナーに見せる",
+                                subtitle: "あなたがマイルームで聴いた曲が\nパートナーの Solo モードに表示されます",
+                                isOn: $sharePlayHistory
+                            )
+                            Divider().background(Color.white.opacity(0.06))
+                            privacyToggleRow(
+                                title: "お気に入りをパートナーに見せる",
+                                subtitle: "あなたが ♥ をつけた曲だけが表示されます",
+                                isOn: $shareFavorites
+                            )
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color.white.opacity(0.04))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                                )
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .onChange(of: sharePlayHistory) { _, newValue in
+                            Task {
+                                await authViewModel.updatePrivacySettings(
+                                    sharePlayHistory: newValue,
+                                    shareFavorites: shareFavorites
+                                )
+                            }
+                        }
+                        .onChange(of: shareFavorites) { _, newValue in
+                            Task {
+                                await authViewModel.updatePrivacySettings(
+                                    sharePlayHistory: sharePlayHistory,
+                                    shareFavorites: newValue
+                                )
+                            }
+                        }
+                    }
+
                     VStack(spacing: 0) {
                         SettingsRow(label: "利用規約", systemImage: "doc.text") {
                             safariURL = AppLinks.termsOfService
@@ -372,6 +420,10 @@ private struct SettingsSheet: View {
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .task {
+                sharePlayHistory = authViewModel.currentProfile?.sharePlayHistory ?? false
+                shareFavorites   = authViewModel.currentProfile?.shareFavorites   ?? true
+            }
         }
         .presentationDetents([.medium, .large])
         .sheet(item: Binding(
@@ -434,6 +486,29 @@ private struct SettingsSheet: View {
     private func pairtuneInviteURL(for code: String) -> URL {
         URL(string: "pairtune://room/\(code)") ?? URL(string: "https://pairtune.app")!
     }
+
+    // MARK: - Privacy toggle row (M6)
+
+    private func privacyToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 15))
+                    .foregroundColor(.white)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(.pairtuneTextTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .tint(.pairtunePrimary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
 }
 
 private struct IdentifiableURL: Identifiable {
@@ -473,9 +548,12 @@ private struct SettingsRow: View {
 private struct RoomViewWrapper: View {
     @Bindable var roomViewModel: RoomViewModel
     let authViewModel: AuthViewModel
+    let pairViewModel: PairViewModel
     var onExit: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
+    @State private var soloHistoryVM = SoloHistoryViewModel()
+    @State private var showHistorySheet = false
 
     var body: some View {
         RoomView(
@@ -486,10 +564,28 @@ private struct RoomViewWrapper: View {
             onExit: onExit,
             onSelectTrack: { _ in }
         )
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if roomViewModel.mode == .solo {
+                historyPeekBar
+            }
+        }
+        .sheet(isPresented: $showHistorySheet) {
+            SoloHistorySheetView(
+                viewModel: soloHistoryVM,
+                partnerName: pairViewModel.partnerProfile?.displayName,
+                hasPair: pairViewModel.activePair != nil
+            )
+        }
         .task {
             let userId = authViewModel.session?.user.id.uuidString ?? ""
             let name = authViewModel.session?.user.userMetadata["full_name"]?.stringValue
             await roomViewModel.enterRoom(userId: userId, displayName: name)
+            if roomViewModel.mode == .solo {
+                await soloHistoryVM.load(
+                    pairId: pairViewModel.activePair?.id,
+                    userId: userId
+                )
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -530,6 +626,38 @@ private struct RoomViewWrapper: View {
                 )
             }
         }
+    }
+
+    // MARK: - History peek bar (Solo モード専用)
+
+    private var historyPeekBar: some View {
+        Button { showHistorySheet = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.pairtunePrimary)
+                Text("聴いた曲を見る")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.pairtuneTextSecondary)
+                Spacer()
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.pairtuneTextTertiary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(
+                Rectangle()
+                    .fill(Color.pairtuneSurface)
+                    .overlay(
+                        Rectangle()
+                            .fill(Color.pairtuneHairline)
+                            .frame(height: 0.5),
+                        alignment: .top
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
