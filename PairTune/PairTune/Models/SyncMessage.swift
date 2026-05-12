@@ -1,12 +1,13 @@
 import Foundation
 
-// MARK: - PlayState (ホストが2秒間隔で送信)
+// MARK: - PlayState (両者が2秒間隔で送信 — M5: 両者対等ホスト)
 
 struct PlayState: Codable {
     var songId: String
     var playbackTime: Double     // 秒
     var isPlaying: Bool
     var hostTimestampMs: Int64   // 送信時の Unix ミリ秒
+    var actorUserId: String      // 送信者の userId (last-write-wins 判定用)
     var seq: Int
 
     enum CodingKeys: String, CodingKey {
@@ -14,6 +15,7 @@ struct PlayState: Codable {
         case playbackTime = "playback_time"
         case isPlaying = "is_playing"
         case hostTimestampMs = "host_timestamp_ms"
+        case actorUserId = "actor_user_id"
         case seq
     }
 }

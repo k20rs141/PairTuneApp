@@ -100,7 +100,19 @@ struct ContentView: View {
                         showCodeEntry = true
                     },
                     onListenWithPartner: {
-                        // M5 (Shared モード) で実装。現状ボタン自体 disabled。
+                        // M5: activePair の sharedRoomId を取得して Shared モードで入室
+                        Task {
+                            guard let pair = pairViewModel.activePair else { return }
+                            let userId = authViewModel.session?.user.id.uuidString ?? ""
+                            await homeViewModel.loadSharedRoom(roomId: pair.sharedRoomId)
+                            guard let sharedRoom = homeViewModel.sharedRoom else { return }
+                            let vm = RoomViewModel(sharedRoomV4: sharedRoom, pairId: pair.id)
+                            roomViewModel = vm
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                screen = .room
+                            }
+                            _ = userId  // enterRoom は RoomViewWrapper の .task で呼ばれる
+                        }
                     },
                     onSolo: {
                         Task {

@@ -315,8 +315,6 @@ struct HomeView: View {
                     )
             )
         }
-        .disabled(true)        // M5 (Shared モード) で実装
-        .opacity(0.65)
     }
 
     private var orDivider: some View {

@@ -55,6 +55,21 @@ final class RoomService {
         return profile
     }
 
+    /// shared_room を ID で取得(M5 Shared モード参加時に使う)。
+    func fetchSharedRoom(roomId: String) async throws -> RoomV4 {
+        let rooms: [RoomV4] = try await client
+            .from("rooms")
+            .select()
+            .eq("id", value: roomId)
+            .limit(1)
+            .execute()
+            .value
+        guard let room = rooms.first else {
+            throw RoomError.notFound
+        }
+        return room
+    }
+
     /// 自分のマイルーム(v0.4 schema、`room_type = 'my_room'`)。
     /// `handle_new_user()` トリガで profile 作成時に my_room も自動生成済み。
     func fetchMyRoomV4() async throws -> RoomV4 {
