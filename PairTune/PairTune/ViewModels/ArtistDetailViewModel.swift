@@ -87,8 +87,8 @@ private struct TopSongsResponse: Decodable {
             guard let attrs = attributes else { return nil }
             let artworkURL = attrs.artwork.flatMap { art -> URL? in
                 let urlStr = art.url
-                    .replacingOccurrences(of: "{w}", with: "100")
-                    .replacingOccurrences(of: "{h}", with: "100")
+                    .replacingOccurrences(of: "{w}", with: "300")
+                    .replacingOccurrences(of: "{h}", with: "300")
                 return URL(string: urlStr)
             }
             return Track(
