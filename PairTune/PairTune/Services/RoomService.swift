@@ -90,6 +90,67 @@ final class RoomService {
         return room
     }
 
+    /// プロフィール画像を Supabase Storage(`avatars` バケット)にアップロードし、
+    /// その公開 URL を `profiles.avatar_url` に反映する。
+    /// パス: `avatars/<user_uuid>/avatar.jpg`(upsert)。
+    /// migrations/0004_avatars_storage.sql を先に適用しておくこと。
+    func uploadAvatar(jpegData: Data) async throws -> String {
+        guard let userId = try? await client.auth.session.user.id else {
+            throw RoomError.notAuthenticated
+        }
+        let path = "\(userId.uuidString.lowercased())/avatar.jpg"
+        let bucket = client.storage.from("avatars")
+        // upsert で同じパスに上書き(古い画像の削除は不要)
+        _ = try await bucket.upload(
+            path,
+            data: jpegData,
+            options: FileOptions(contentType: "image/jpeg", upsert: true)
+        )
+        let publicURL = try bucket.getPublicURL(path: path)
+        // cache busting: 同一 URL でも画像が変わったことを下流に伝えるため query を付与
+        let urlWithCacheBust = publicURL.absoluteString + "?t=\(Int(Date().timeIntervalSince1970))"
+        try await client
+            .from("profiles")
+            .update(["avatar_url": urlWithCacheBust])
+            .eq("id", value: userId.uuidString)
+            .execute()
+        return urlWithCacheBust
+    }
+
+    /// 表示名を更新(プロフィール編集)。
+    func updateDisplayName(_ displayName: String) async throws {
+        guard let userId = try? await client.auth.session.user.id else {
+            throw RoomError.notAuthenticated
+        }
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try await client
+            .from("profiles")
+            .update(["display_name": trimmed])
+            .eq("id", value: userId.uuidString)
+            .execute()
+    }
+
+    /// 通知設定を更新(M6: notify_partner_online / notify_milestones)。
+    func updateNotificationSettings(notifyPartnerOnline: Bool, notifyMilestones: Bool) async throws {
+        guard let userId = try? await client.auth.session.user.id else {
+            throw RoomError.notAuthenticated
+        }
+        struct NotifyUpdate: Encodable {
+            let notifyPartnerOnline: Bool
+            let notifyMilestones: Bool
+            enum CodingKeys: String, CodingKey {
+                case notifyPartnerOnline = "notify_partner_online"
+                case notifyMilestones    = "notify_milestones"
+            }
+        }
+        try await client
+            .from("profiles")
+            .update(NotifyUpdate(notifyPartnerOnline: notifyPartnerOnline, notifyMilestones: notifyMilestones))
+            .eq("id", value: userId.uuidString)
+            .execute()
+    }
+
     /// プライバシー設定を保存する(M6: share_play_history / share_favorites)。
     func updatePrivacySettings(sharePlayHistory: Bool, shareFavorites: Bool) async throws {
         guard let userId = try? await client.auth.session.user.id else {

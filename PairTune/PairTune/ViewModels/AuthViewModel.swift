@@ -106,6 +106,48 @@ final class AuthViewModel: NSObject {
         }
     }
 
+    /// 通知設定を更新し、ローカルの currentProfile にも反映する。
+    func updateNotificationSettings(notifyPartnerOnline: Bool, notifyMilestones: Bool) async {
+        do {
+            try await roomService.updateNotificationSettings(
+                notifyPartnerOnline: notifyPartnerOnline,
+                notifyMilestones: notifyMilestones
+            )
+            currentProfile?.notifyPartnerOnline = notifyPartnerOnline
+            currentProfile?.notifyMilestones = notifyMilestones
+        } catch {
+            print("[AuthViewModel] updateNotificationSettings error:", error)
+            lastError = "通知設定の保存に失敗しました"
+        }
+    }
+
+    /// プロフィール画像を Supabase Storage にアップロードし、profiles.avatar_url を更新。
+    /// 成功時は currentProfile にも反映する。
+    func updateAvatarImage(jpegData: Data) async -> Bool {
+        do {
+            let newUrl = try await roomService.uploadAvatar(jpegData: jpegData)
+            currentProfile?.avatarUrl = newUrl
+            return true
+        } catch {
+            print("[AuthViewModel] updateAvatarImage error:", error)
+            lastError = "プロフィール画像の更新に失敗しました"
+            return false
+        }
+    }
+
+    /// 表示名を更新。空文字列は無視。
+    func updateDisplayName(_ newName: String) async {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != currentProfile?.displayName else { return }
+        do {
+            try await roomService.updateDisplayName(trimmed)
+            currentProfile?.displayName = trimmed
+        } catch {
+            print("[AuthViewModel] updateDisplayName error:", error)
+            lastError = "表示名の更新に失敗しました"
+        }
+    }
+
     // MARK: - Sign out
 
     func signOut() async {
