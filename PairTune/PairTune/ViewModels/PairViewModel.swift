@@ -49,6 +49,10 @@ final class PairViewModel {
     /// pendingRequest の requester プロフィール(モーダルに表示)
     var pendingRequester: ProfileV4?
 
+    /// 承認 → ペア成立後、Celebration UI を表示するか(`acceptIncoming` 成功時に true)
+    /// `dismissApprovalSheet()` で false に戻して sheet を閉じる。
+    var showingCelebration: Bool = false
+
     /// 自分が送信した申請の現状態
     var sendState: SendState = .idle
     /// 直近の送信申請(あれば)
@@ -103,6 +107,7 @@ final class PairViewModel {
         meId = nil
         pendingRequest = nil
         pendingRequester = nil
+        showingCelebration = false
         outgoingRequest = nil
         sendState = .idle
         activePair = nil
@@ -193,14 +198,23 @@ final class PairViewModel {
         guard let req = pendingRequest else { return }
         do {
             _ = try await pairService.acceptRequest(req.id)
-            pendingRequest = nil
-            pendingRequester = nil
             await refreshActivePair()
+            // sheet は閉じず、Celebration body に切り替える。
+            // pendingRequest は finishCelebration() で nil 化されて sheet 閉じる。
+            showingCelebration = true
         } catch {
             print("[PairViewModel] accept error:", error)
             // 失敗時はモーダルは閉じない(ユーザーが再試行できるように)
             // 期限切れ等は postgres_changes UPDATE で自然に消える
         }
+    }
+
+    /// Celebration の「ふたりの部屋を開く」タップ後の後処理。
+    /// pendingRequest を nil 化することで sheet を閉じる。
+    func finishCelebration() {
+        showingCelebration = false
+        pendingRequest = nil
+        pendingRequester = nil
     }
 
     func rejectIncoming() async {
