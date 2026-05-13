@@ -146,6 +146,13 @@ final class PairViewModel {
         guard let meId else { return }
         do {
             let req = try await pairService.fetchPendingIncomingRequest(userId: meId)
+            let deferred = loadDeferredIds()
+            // 「あとで」で保留に入れた申請はモーダル表示せずスキップ
+            if let req, deferred.contains(req.id) {
+                pendingRequest = nil
+                pendingRequester = nil
+                return
+            }
             pendingRequest = req
             if let req {
                 pendingRequester = try? await pairService.fetchProfile(userId: req.requesterId)
@@ -228,11 +235,36 @@ final class PairViewModel {
         }
     }
 
-    /// 「あとで決める」: モーダルを閉じるだけ(DB は変更しない)。
-    /// 次回 refreshPendingIncoming で再表示される。
+    /// 「あとで決める」: モーダルを閉じる + 該当 request.id を UserDefaults の
+    /// 「保留 ID 集合」に追加して以後の自動表示を抑制する(再起動・refresh しても出ない)。
+    /// 期限は DB 側の 24h 自動失効に委ねる。ユーザーが再度承認したくなった場合は
+    /// 設定や通知から手動で承認モーダルを呼び出す(将来課題)。
     func dismissIncoming() {
+        if let id = pendingRequest?.id {
+            addDeferredId(id)
+        }
         pendingRequest = nil
         pendingRequester = nil
+    }
+
+    // MARK: - Deferred request persistence (UserDefaults)
+
+    private static let deferredKey = "pt.deferredPairRequestIds"
+
+    private func loadDeferredIds() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.deferredKey) ?? [])
+    }
+
+    private func addDeferredId(_ id: String) {
+        var s = loadDeferredIds()
+        s.insert(id)
+        UserDefaults.standard.set(Array(s), forKey: Self.deferredKey)
+    }
+
+    private func removeDeferredId(_ id: String) {
+        var s = loadDeferredIds()
+        s.remove(id)
+        UserDefaults.standard.set(Array(s), forKey: Self.deferredKey)
     }
 
     /// 解消: end_pair_relationship() RPC を呼ぶ。成功なら true。
@@ -259,6 +291,21 @@ final class PairViewModel {
         }
     }
 
+    /// PairWaitingView の「申請を取り消す」用。
+    /// `cancel_pair_request()` RPC で DB の status を 'cancelled' に更新し、
+    /// その後ローカル state もクリアする(B 側はこれ以降この申請を承認できなくなる)。
+    func cancelOutgoingRequest() async {
+        guard case .waiting = sendState, let req = outgoingRequest else { return }
+        do {
+            try await pairService.cancelRequest(req.id)
+        } catch {
+            print("[PairViewModel] cancelOutgoingRequest error:", error)
+            // DB 側で失敗しても UI 側はキャンセル扱いにする(24h で自動失効する)
+        }
+        sendState = .idle
+        outgoingRequest = nil
+    }
+
     // MARK: - Realtime subscription
 
     private func subscribe(myUserId: String) async {
@@ -268,6 +315,14 @@ final class PairViewModel {
         // 受信側: 自分宛の新規申請 INSERT
         let reqInserts = ch.postgresChange(
             InsertAction.self,
+            schema: "public",
+            table: "pair_requests",
+            filter: "target_id=eq.\(myUserId)"
+        )
+        // 受信側: 自分宛の申請の status 変化 UPDATE
+        // (A 側が cancel した時 / cron で expired になった時に承認モーダルを閉じるため)
+        let reqUpdatesIn = ch.postgresChange(
+            UpdateAction.self,
             schema: "public",
             table: "pair_requests",
             filter: "target_id=eq.\(myUserId)"
@@ -320,6 +375,13 @@ final class PairViewModel {
             }
         })
         listenTasks.append(Task { [weak self] in
+            for await _ in reqUpdatesIn {
+                // A 側 cancel や cron expired を受け取ると pending では無くなるので
+                // fetchPendingIncomingRequest は nil を返し → 承認モーダルが閉じる
+                await self?.refreshPendingIncoming()
+            }
+        })
+        listenTasks.append(Task { [weak self] in
             for await _ in reqUpdatesOut {
                 await self?.handleOutgoingUpdate()
             }
@@ -349,6 +411,11 @@ final class PairViewModel {
             sendState = .rejected
         case .expired:
             sendState = .expired
+        case .cancelled:
+            // 自分で取り消した時の最終確認: ローカル state を idle に戻し、
+            // outgoingRequest も nil 化(PairWaitingView の再表示を防ぐ)
+            sendState = .idle
+            outgoingRequest = nil
         case .pending:
             if !out.isExpired { sendState = .waiting }
         }

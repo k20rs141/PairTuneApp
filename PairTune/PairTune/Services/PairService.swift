@@ -124,6 +124,24 @@ final class PairService {
         }
     }
 
+    /// 申請者(A 側)から申請を取消(status='cancelled', responded_at=NOW)。
+    /// `cancel_pair_request()` SECURITY DEFINER RPC を経由する(RLS 上 A 側は通常 UPDATE できないため)。
+    /// 取消後は B 側の `accept_pair_request()` が `status != 'pending'` で弾かれる。
+    /// migrations/0005_cancel_pair_request.sql を先に適用しておくこと。
+    func cancelRequest(_ requestId: String) async throws {
+        struct Params: Encodable {
+            let pRequestId: String
+            enum CodingKeys: String, CodingKey { case pRequestId = "p_request_id" }
+        }
+        do {
+            try await client
+                .rpc("cancel_pair_request", params: Params(pRequestId: requestId))
+                .execute()
+        } catch {
+            throw PairError.unknown(error)
+        }
+    }
+
     /// 申請を拒否(status='rejected', responded_at=NOW)。
     func rejectRequest(_ requestId: String) async throws {
         let iso = ISO8601DateFormatter()

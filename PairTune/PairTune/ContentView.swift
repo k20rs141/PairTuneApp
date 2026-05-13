@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var showCodeEntry: Bool = false
     @State private var showSettings: Bool = false
     @State private var showSoloMode: Bool = false
+    @State private var showPairWaiting: Bool = false
 
     @State private var homeViewModel = HomeViewModel()
     @State private var pairViewModel = PairViewModel()
@@ -48,21 +49,33 @@ struct ContentView: View {
                 showSettings = false
                 showCodeEntry = false
                 showSoloMode = false
+                showPairWaiting = false
             }
         }
         .onChange(of: pairViewModel.sendState) { _, newState in
             switch newState {
+            case .waiting:
+                // 申請が DB に INSERT 成功した直後 → コード入力 sheet を閉じて
+                // 承認待ち fullScreenCover を表示する
+                showCodeEntry = false
+                showPairWaiting = true
+            case .accepted:
+                // 相手が承認(activePair も立つ) → 承認待ち画面を閉じる
+                showPairWaiting = false
             case .rejected:
+                showPairWaiting = false
                 pendingSendAlert = PairSendAlert(
                     title: "申請が拒否されました",
                     message: "残念ながら相手はペアリングに同意しませんでした。"
                 )
             case .expired:
+                showPairWaiting = false
                 pendingSendAlert = PairSendAlert(
                     title: "申請の有効期限が切れました",
                     message: "申請から 24 時間が経過したため失効しました。もう一度送信してください。"
                 )
             case .error(let msg):
+                showPairWaiting = false
                 pendingSendAlert = PairSendAlert(title: "申請エラー", message: msg)
             default:
                 break
@@ -99,7 +112,12 @@ struct ContentView: View {
             NavigationStack {
                 HomeView(
                     pairingCode: authViewModel.pairingCode,
+                    myName: authViewModel.currentProfile?.displayName,
                     partnerName: pairViewModel.partnerProfile?.displayName,
+                    // MVP: presence 未実装。partnerProfile が解決した時点で online とする。
+                    // 将来は Realtime Presence や `last_seen_at` で実装。
+                    partnerOnline: pairViewModel.partnerProfile != nil,
+                    partnerLastSeen: nil,
                     onShareCode: {},
                     onJoin: { showCodeEntry = true },
                     onListenWithPartner: {
@@ -120,7 +138,16 @@ struct ContentView: View {
                             )
                         }
                     },
-                    onProfile: { showSettings = true }
+                    onProfile: { showSettings = true },
+                    onOpenAndWait: {
+                        // オフライン状態でも部屋に入って待機(現状はオンライン時と同じ動作)
+                        Task {
+                            guard let pair = pairViewModel.activePair else { return }
+                            await homeViewModel.loadSharedRoom(roomId: pair.sharedRoomId)
+                            guard let sharedRoom = homeViewModel.sharedRoom else { return }
+                            roomViewModel = RoomViewModel(sharedRoomV4: sharedRoom, pairId: pair.id)
+                        }
+                    }
                 )
                 .toolbar(.hidden, for: .navigationBar)
                 // 設定: Navigation push（HIG — 階層的ドリルダウン）
@@ -168,6 +195,24 @@ struct ContentView: View {
                             await pairViewModel.requestPair(targetCode: code)
                         },
                         onRequested: {}
+                    )
+                }
+                // ペア申請中: 承認待ち画面（fullScreenCover）
+                // sendState == .waiting の間、A 側に表示。相手の承認(activePair が立つ)で
+                // 自動 dismiss → home が paired 状態へ。`requestPair` 直後は code entry の sheet
+                // と重なるので、code entry が閉じた後に表示するよう .onChange 監視で開く。
+                .fullScreenCover(isPresented: $showPairWaiting) {
+                    PairWaitingView(
+                        targetCode: nil,
+                        expiresAt: pairViewModel.outgoingRequest?.expiresAt,
+                        myInitial: String((authViewModel.currentProfile?.displayName ?? "Y").prefix(1)).uppercased(),
+                        onCancel: {
+                            // 申請を取り消す: cancel_pair_request RPC で DB の status を
+                            // 'cancelled' に更新し、B 側が承認できない状態にする
+                            Task { await pairViewModel.cancelOutgoingRequest() }
+                            showPairWaiting = false
+                        },
+                        onClose: { showPairWaiting = false }
                     )
                 }
                 // ペア承認: Modal sheet（HIG — 割り込み通知）

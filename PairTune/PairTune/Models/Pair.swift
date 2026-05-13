@@ -92,4 +92,5 @@ enum PairRequestStatus: String, Codable {
     case accepted
     case rejected
     case expired
+    case cancelled
 }
