@@ -10,6 +10,11 @@ final class SearchViewModel {
     var isSearching: Bool = false
     var searchError: String?
     var subscriptionMissing: Bool = false
+    /// `URLError.notConnectedToInternet` 等が検出された時に true。
+    /// EmptyStateView を `.offline` で表示するためのフラグ。
+    var isOffline: Bool = false
+    /// 直近の検索クエリ。「再試行」CTA から検索をやり直す時に使う。
+    private(set) var lastQuery: String = ""
 
     let roomViewModel: RoomViewModel
     private var debounceTask: Task<Void, Never>?
@@ -34,10 +39,12 @@ final class SearchViewModel {
 
     func onSearchTextChanged(_ text: String) {
         debounceTask?.cancel()
+        lastQuery = text
         guard !text.isEmpty else {
             songs = []
             artists = []
             isSearching = false
+            isOffline = false
             searchError = subscriptionMissing ? "Apple Music の契約が必要です" : nil
             return
         }
@@ -48,11 +55,18 @@ final class SearchViewModel {
         }
         isSearching = true
         searchError = nil
+        isOffline = false
         debounceTask = Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             await search(text)
         }
+    }
+
+    /// EmptyStateView の「再試行」CTA から呼ぶ。直近のクエリで再検索する。
+    func retrySearch() {
+        guard !lastQuery.isEmpty else { return }
+        onSearchTextChanged(lastQuery)
     }
 
     func selectSong(_ track: Track) {
@@ -84,9 +98,28 @@ final class SearchViewModel {
             print("[SearchViewModel] search error:", error)
             songs = []
             artists = []
-            searchError = "検索できません。リトライしてください"
+            if let urlErr = error as? URLError, isOfflineCode(urlErr.code) {
+                isOffline = true
+                searchError = nil
+            } else {
+                isOffline = false
+                searchError = "検索できません。リトライしてください"
+            }
         }
         isSearching = false
+    }
+
+    private func isOfflineCode(_ code: URLError.Code) -> Bool {
+        switch code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .cannotConnectToHost,
+             .dnsLookupFailed,
+             .timedOut:
+            return true
+        default:
+            return false
+        }
     }
 }
 

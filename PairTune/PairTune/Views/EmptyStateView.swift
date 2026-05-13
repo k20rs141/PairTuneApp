@@ -22,13 +22,17 @@ struct EmptyStateView: View {
     let kind: EmptyStateKind
     /// 結果なし時は検索キーワードを差し込めるよう description を上書き可能。
     var descriptionOverride: String? = nil
+    /// true なら ZStack 背景を描かない(SearchSheet 等の sheet 内に埋め込む時用)。
+    var transparentBackground: Bool = false
 
     var onBack: (() -> Void)? = nil
     var onAction: (() -> Void)? = nil
 
     var body: some View {
         ZStack {
-            Color.pairtuneBase.ignoresSafeArea()
+            if !transparentBackground {
+                Color.pairtuneBase.ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
                 if let onBack {

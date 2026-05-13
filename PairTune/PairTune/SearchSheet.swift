@@ -105,21 +105,39 @@ struct SearchSheet: View {
             // Results
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if viewModel.isSearching {
+                    if viewModel.subscriptionMissing {
+                        EmptyStateView(
+                            kind: .authError,
+                            transparentBackground: true,
+                            onAction: {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                        )
+                        .frame(height: 480)
+                    } else if viewModel.isOffline {
+                        EmptyStateView(
+                            kind: .offline,
+                            transparentBackground: true,
+                            onAction: { viewModel.retrySearch() }
+                        )
+                        .frame(height: 480)
+                    } else if viewModel.isSearching {
                         ForEach(0..<5, id: \.self) { _ in
                             SkeletonRow()
                         }
                     } else if viewModel.songs.isEmpty && viewModel.artists.isEmpty && !query.isEmpty {
-                        VStack(spacing: 6) {
-                            Text("該当する結果がありません")
-                                .font(.system(size: 14))
-                                .foregroundColor(.pairtuneTextSecondary)
-                            Text("No results")
-                                .font(.system(size: 11))
-                                .foregroundColor(.pairtuneTextTertiary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 60)
+                        EmptyStateView(
+                            kind: .noResults,
+                            descriptionOverride: "「\(query)」に一致する曲は見つかりませんでした。",
+                            transparentBackground: true,
+                            onAction: {
+                                query = ""
+                                searchFocused = true
+                            }
+                        )
+                        .frame(height: 480)
                     } else {
                         if !viewModel.artists.isEmpty {
                             sectionHeader("アーティスト · Artists")
