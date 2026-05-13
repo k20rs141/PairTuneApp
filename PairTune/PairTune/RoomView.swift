@@ -6,13 +6,37 @@ struct RoomView: View {
     var isHost: Bool = true
     var participantCount: Int = 2
     var guestJoining: Bool = false
+    var meName: String = "You"
+    var partnerName: String? = nil
     var onExit: () -> Void
     var onSelectTrack: (Track) -> Void
 
     @State private var toastMessage: String? = nil
     @State private var showSearch: Bool = false
     @State private var showDebug: Bool = false
-    @State private var searchViewModel: SearchViewModel?
+    @State private var showExitConfirm: Bool = false
+    @State private var searchViewModel: SearchViewModel
+
+    init(
+        roomViewModel: RoomViewModel,
+        isHost: Bool = true,
+        participantCount: Int = 2,
+        guestJoining: Bool = false,
+        meName: String = "You",
+        partnerName: String? = nil,
+        onExit: @escaping () -> Void,
+        onSelectTrack: @escaping (Track) -> Void
+    ) {
+        self.roomViewModel = roomViewModel
+        self.isHost = isHost
+        self.participantCount = participantCount
+        self.guestJoining = guestJoining
+        self.meName = meName
+        self.partnerName = partnerName
+        self.onExit = onExit
+        self.onSelectTrack = onSelectTrack
+        _searchViewModel = State(initialValue: SearchViewModel(roomViewModel: roomViewModel))
+    }
 
     private var syncState: SyncState { roomViewModel.syncState }
     private var currentTrack: Track? { roomViewModel.currentTrack }
@@ -113,35 +137,38 @@ struct RoomView: View {
         .simultaneousGesture(
             TapGesture(count: 3).onEnded { showDebug.toggle() }
         )
-        .task {
-            if roomViewModel.isHost {
-                searchViewModel = SearchViewModel(roomViewModel: roomViewModel)
-            }
+        .confirmationDialog(
+            "再生中ですが、ルームを閉じますか?",
+            isPresented: $showExitConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("閉じる(再生は続ける)") { onExit() }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("バックグラウンドでも再生は継続します。停止したい時は一時停止してから閉じてください。")
         }
         .sheet(isPresented: $showSearch) {
-            if let vm = searchViewModel {
-                @Bindable var bindableVM = vm
-                SearchSheet(isPresented: $showSearch, viewModel: vm)
-                    .alert(
-                        bindableVM.searchError ?? "",
-                        isPresented: Binding(
-                            get: { bindableVM.searchError != nil },
-                            set: { if !$0 { bindableVM.searchError = nil } }
-                        )
-                    ) {
-                        if bindableVM.subscriptionMissing {
-                            Button("設定を開く") {
-                                if let url = URL(string: UIApplication.openSettingsURLString) {
-                                    UIApplication.shared.open(url)
-                                }
-                                bindableVM.searchError = nil
+            @Bindable var bindableVM = searchViewModel
+            SearchSheet(isPresented: $showSearch, viewModel: searchViewModel)
+                .alert(
+                    bindableVM.searchError ?? "",
+                    isPresented: Binding(
+                        get: { bindableVM.searchError != nil },
+                        set: { if !$0 { bindableVM.searchError = nil } }
+                    )
+                ) {
+                    if bindableVM.subscriptionMissing {
+                        Button("設定を開く") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
                             }
-                            Button("閉じる", role: .cancel) { bindableVM.searchError = nil }
-                        } else {
-                            Button("OK", role: .cancel) { bindableVM.searchError = nil }
+                            bindableVM.searchError = nil
                         }
+                        Button("閉じる", role: .cancel) { bindableVM.searchError = nil }
+                    } else {
+                        Button("OK", role: .cancel) { bindableVM.searchError = nil }
                     }
-            }
+                }
         }
     }
 
@@ -150,7 +177,7 @@ struct RoomView: View {
     private var headerBar: some View {
         HStack {
             FrostedCircleButton(icon: "rectangle.portrait.and.arrow.forward", size: 38) {
-                onExit()
+                attemptExit()
             }
 
             Spacer()
@@ -254,17 +281,40 @@ struct RoomView: View {
     }
 
     private var participantsRow: some View {
-        let visible = Array(mockParticipants.prefix(participantCount))
-        return HStack(spacing: 14) {
-            ForEach(visible) { p in
-                VStack(spacing: 5) {
-                    AvatarView(participant: p, size: 40, showCrown: true)
-                    Text(p.nameJa)
-                        .font(.system(size: 10.5))
-                        .foregroundColor(p.id == "me" ? .white : .pairtuneTextSecondary)
-                        .tracking(0.2)
-                }
+        HStack(spacing: 14) {
+            participantBadge(name: meName, isMe: true)
+            if let partnerName, roomViewModel.mode == .shared {
+                participantBadge(name: partnerName, isMe: false)
             }
+        }
+    }
+
+    private func participantBadge(name: String, isMe: Bool) -> some View {
+        VStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isMe
+                                ? [Color.pairtunePrimary, Color.pairtunePrimary.opacity(0.65)]
+                                : [Color.pairtuneSecondary, Color.pairtuneSecondary.opacity(0.65)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Text(String(name.prefix(2)).uppercased())
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.pairtuneBase)
+                    )
+                    .overlay(Circle().stroke(Color(hex: "1A1A1A"), lineWidth: 1.5))
+            }
+            Text(name)
+                .font(.system(size: 10.5))
+                .foregroundColor(isMe ? .white : .pairtuneTextSecondary)
+                .tracking(0.2)
+                .lineLimit(1)
         }
     }
 
@@ -407,6 +457,23 @@ struct RoomView: View {
 
     private func togglePlayback() {
         Task { await roomViewModel.togglePlayback() }
+    }
+
+    /// 退室ボタンタップ時のハンドラ。再生中は確認ダイアログを挟む。
+    /// 再生していなければ即時 onExit(再生中フラグは false → leaveRoom で stop)。
+    private func attemptExit() {
+        if isMusicLive {
+            showExitConfirm = true
+        } else {
+            onExit()
+        }
+    }
+
+    private var isMusicLive: Bool {
+        switch syncState {
+        case .playing, .paused, .loading, .outOfSync: return true
+        default: return false
+        }
     }
 }
 

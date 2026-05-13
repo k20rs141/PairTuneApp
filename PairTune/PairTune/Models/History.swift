@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Play History Models (v0.4)
 // 再生履歴(shared / my の2系統)を扱うモデル。
@@ -57,6 +58,25 @@ struct PlayHistoryEntry: Codable, Identifiable {
         case userId = "user_id"
         case isFavorited = "is_favorited"
         case favoritedAt = "favorited_at"
+    }
+
+    /// 履歴エントリから再生用 Track を作る。
+    /// duration / gradient はプレースホルダ — `RoomViewModel.playAsHost` が
+    /// musicService.load 後に `currentSong.toTrack()` で実データに上書きする。
+    func toTrack() -> Track {
+        Track(
+            id: songId,
+            title: songTitle,
+            artist: artistName,
+            album: albumTitle ?? "",
+            duration: playedDurationSeconds,
+            gradientStops: [
+                .init(color: .pairtunePrimary, location: 0.0),
+                .init(color: Color(hex: "4A1D3D"), location: 1.0),
+            ],
+            dominant: .pairtunePrimary,
+            artworkURL: artworkUrl.flatMap(URL.init(string:))
+        )
     }
 }
 

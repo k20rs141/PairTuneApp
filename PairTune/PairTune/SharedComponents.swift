@@ -314,8 +314,12 @@ struct ArtworkCardView: View {
         return TimelineView(.animation(paused: !playing)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             let angle = t.truncatingRemainder(dividingBy: 14.0) / 14.0 * 360.0
-            VinylDiscBody(diameter: discDiam, labelStops: track?.gradientStops)
-                .rotationEffect(.degrees(angle))
+            VinylDiscBody(
+                diameter: discDiam,
+                labelStops: track?.gradientStops,
+                artworkURL: track?.artworkURL
+            )
+            .rotationEffect(.degrees(angle))
         }
         .frame(width: discDiam, height: discDiam)
         .shadow(color: .black.opacity(0.75), radius: 30, y: 14)
@@ -327,6 +331,7 @@ struct ArtworkCardView: View {
 private struct VinylDiscBody: View {
     let diameter: CGFloat
     let labelStops: [Gradient.Stop]?
+    var artworkURL: URL? = nil
 
     var body: some View {
         ZStack {
@@ -411,10 +416,24 @@ private struct VinylDiscBody: View {
     private var label: some View {
         let labelDiam = diameter * 0.44
         return ZStack {
-            Circle()
-                .fill(labelFillStyle)
+            // Base: artwork image when available, otherwise the gradient label
+            if let url = artworkURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        Circle().fill(labelFillStyle)
+                    }
+                }
+                .clipShape(Circle())
+            } else {
+                Circle().fill(labelFillStyle)
+            }
 
-            // iridescent ring
+            // iridescent ring (subtle overlay even with artwork)
             Circle()
                 .fill(
                     AngularGradient(
@@ -429,7 +448,7 @@ private struct VinylDiscBody: View {
                     )
                 )
                 .blendMode(.overlay)
-                .opacity(0.7)
+                .opacity(artworkURL == nil ? 0.7 : 0.25)
 
             // soft inner shadow approximation
             Circle()

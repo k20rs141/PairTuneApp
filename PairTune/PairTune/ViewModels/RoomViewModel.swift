@@ -51,7 +51,9 @@ enum RoomAlert: String, Identifiable {
 
 @Observable
 @MainActor
-final class RoomViewModel {
+final class RoomViewModel: Identifiable {
+    var id: String { currentRoom.id }
+
     // MARK: - Room info
 
     let currentRoom: Room
@@ -100,6 +102,11 @@ final class RoomViewModel {
 
     // Solo / Shared 共通: 30秒履歴タイマー
     private var historyTimerTask: Task<Void, Never>?
+
+    /// enterRoom 完了直後に自動再生する曲。caller が roomViewModel を生成→セットしてから
+    /// RoomViewWrapper の .task で enterRoom が走るタイミングで playAsHost に渡される。
+    /// SoloModeView の NowPlaying / TrackListItem タップから直接再生開始するために使う。
+    var pendingInitialTrack: Track?
 
     // デバッグ用
     var debugLastDriftMs: Double = 0
@@ -161,6 +168,7 @@ final class RoomViewModel {
         // Solo モード: Realtime 接続は不要、userId だけ保持して終わり
         if mode == .solo {
             myUserId = userId
+            await playPendingInitialTrackIfNeeded()
             return
         }
 
@@ -179,6 +187,13 @@ final class RoomViewModel {
         startGuestListeners()  // 相手からの状態・イベントを受信
         // 遅延参加: DB に曲が保存されていれば先読みしておく
         await syncToCurrentRoomState()
+        await playPendingInitialTrackIfNeeded()
+    }
+
+    private func playPendingInitialTrackIfNeeded() async {
+        guard let track = pendingInitialTrack else { return }
+        pendingInitialTrack = nil
+        await playAsHost(track)
     }
 
     func reconnect(userId: String, displayName: String?) async {
@@ -195,9 +210,16 @@ final class RoomViewModel {
         startGuestListeners()
     }
 
-    func leaveRoom() async {
+    /// ルームを離脱する。
+    /// - Parameter keepPlaying: true なら musicService.stop() を呼ばず、再生を継続したまま
+    ///   Realtime 接続だけ閉じる(SoloModeView に戻った後もバックグラウンドで音楽を流したい場合)。
+    ///   ApplicationMusicPlayer.shared はシングルトンなので RoomViewModel が破棄されても
+    ///   システムプレイヤーの再生は続く。
+    func leaveRoom(keepPlaying: Bool = false) async {
         historyTimerTask?.cancel()
-        musicService.stop()
+        if !keepPlaying {
+            musicService.stop()
+        }
 
         // Solo モード: Realtime/DB 操作は不要
         if mode == .solo { return }
@@ -242,9 +264,12 @@ final class RoomViewModel {
             activeSongId = songId
             try await musicService.load(songId: songId, at: 0)
 
-            // MusicKit Song で Track を上書き(duration を実データに更新)
+            // duration だけ MusicKit から拾い、その他(title/artist/album/artwork)は
+            // 元の track(検索結果 or 履歴 = 日本語ローカライズ済み)をそのまま使う。
+            // `song.toTrack()` で全て上書きすると MusicKit の既定ロケール(英語のことが多い)に
+            // 戻ってしまい「検索は日本語なのに RoomView は英語」の表示崩れになるため。
             if let song = musicService.currentSong {
-                currentTrack = song.toTrack()
+                currentTrack = track.applyingDuration(from: song)
             }
 
             syncState = .playing
@@ -390,15 +415,32 @@ final class RoomViewModel {
             try await musicService.load(songId: songId, at: 0)
             // 即時 pause: 相手の PlayState (isPlaying=true) で再開される。
             musicService.pause()
-            if let song = musicService.currentSong {
-                currentTrack = song.toTrack()
-            }
+            await updateCurrentTrackLocalized(songId: songId)
             syncState = .paused
             isPaused = true
         } catch {
             print("[RoomViewModel] syncToCurrentRoomState error:", error)
             roomAlert = (error as? MusicLoadError) == .timeout ? .songLoadTimeout : .songNotInCatalog
             syncState = .idle
+        }
+    }
+
+    /// MusicKit の `currentSong` を即時 currentTrack に反映してから、
+    /// 日本語ローカライズ版を Apple Music API から取得して上書きする。
+    /// MusicKit 側の `Song` メタデータは既定 storefront ロケール(英語のことがある)で
+    /// 返るため、検索結果(`l=ja-JP`)との表示一致のためにこの 2 段階更新を行う。
+    private func updateCurrentTrackLocalized(songId: String) async {
+        // 1. 速攻で MusicKit から(英語の可能性あり、でも表示は出る)
+        if let song = musicService.currentSong {
+            currentTrack = song.toTrack()
+        }
+        // 2. 日本語版を取得して上書き(数百 ms 後)
+        if let jp = await musicService.fetchLocalizedTrack(songId: songId) {
+            if let song = musicService.currentSong {
+                currentTrack = jp.applyingDuration(from: song)
+            } else {
+                currentTrack = jp
+            }
         }
     }
 
@@ -422,9 +464,7 @@ final class RoomViewModel {
             do {
                 let estimatedPos = estimatedHostTime(state)
                 try await musicService.load(songId: state.songId, at: max(0, estimatedPos))
-                if let song = musicService.currentSong {
-                    currentTrack = song.toTrack()
-                }
+                await updateCurrentTrackLocalized(songId: state.songId)
                 syncState = state.isPlaying ? .playing : .paused
                 isPaused = !state.isPlaying
                 // 受信側: 新しい曲を受け取ったので履歴タイマーを開始
@@ -485,9 +525,7 @@ final class RoomViewModel {
                 syncState = .loading
                 do {
                     try await musicService.load(songId: sid, at: max(0, event.playbackTime))
-                    if let song = musicService.currentSong {
-                        currentTrack = song.toTrack()
-                    }
+                    await updateCurrentTrackLocalized(songId: sid)
                     syncState = .playing
                     isPaused = false
                     // 受信側: 履歴タイマー開始
@@ -517,9 +555,7 @@ final class RoomViewModel {
                 syncState = .loading
                 do {
                     try await musicService.load(songId: sid, at: max(0, event.playbackTime))
-                    if let song = musicService.currentSong {
-                        currentTrack = song.toTrack()
-                    }
+                    await updateCurrentTrackLocalized(songId: sid)
                     syncState = .playing
                     isPaused = false
                     if let track = currentTrack {
