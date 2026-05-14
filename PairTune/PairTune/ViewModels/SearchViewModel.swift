@@ -1,6 +1,7 @@
 import Foundation
 import MusicKit
 import SwiftUI
+import Supabase
 
 @Observable
 @MainActor
@@ -16,12 +17,123 @@ final class SearchViewModel {
     /// 直近の検索クエリ。「再試行」CTA から検索をやり直す時に使う。
     private(set) var lastQuery: String = ""
 
+    // MARK: - Empty state (検索前画面 §2.6.1)
+
+    /// 検索履歴(UserDefaults 永続)。新しい順、最大 8 件。
+    var recentSearches: [String] = []
+    /// 自分の最近の再生(my_room_play_history)。
+    var myRecentTracks: [PlayHistoryEntry] = []
+    /// ふたりで最近の再生(shared_room_play_history)。Solo モードでは空。
+    var sharedRecentTracks: [PlayHistoryEntry] = []
+    /// 履歴から導出した「おすすめのアーティスト」。Artist.artworkURL は nil で
+    /// gradient placeholder 表示にする(MVP)。
+    var suggestedArtists: [Artist] = []
+
     let roomViewModel: RoomViewModel
     private var debounceTask: Task<Void, Never>?
+    private static let recentSearchesKey = "pt.recentSearches"
+    private static let recentSearchesMax = 8
 
     init(roomViewModel: RoomViewModel) {
         self.roomViewModel = roomViewModel
+        loadRecentSearches()
         Task { await checkSubscription() }
+    }
+
+    // MARK: - Recent searches
+
+    private func loadRecentSearches() {
+        recentSearches = UserDefaults.standard.stringArray(forKey: Self.recentSearchesKey) ?? []
+    }
+
+    private func saveRecentSearches() {
+        UserDefaults.standard.set(recentSearches, forKey: Self.recentSearchesKey)
+    }
+
+    func addRecentSearch(_ term: String) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        recentSearches.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        recentSearches.insert(trimmed, at: 0)
+        if recentSearches.count > Self.recentSearchesMax {
+            recentSearches = Array(recentSearches.prefix(Self.recentSearchesMax))
+        }
+        saveRecentSearches()
+    }
+
+    func removeRecentSearch(_ term: String) {
+        recentSearches.removeAll { $0 == term }
+        saveRecentSearches()
+    }
+
+    func clearRecentSearches() {
+        recentSearches.removeAll()
+        saveRecentSearches()
+    }
+
+    // MARK: - Empty state data
+
+    /// 検索前画面用に「自分の最近」と「ふたりで最近」、おすすめアーティストを取得。
+    /// SearchSheet が表示される直前(onAppear)に呼ぶ想定。
+    func loadEmptyStateData() async {
+        guard let userId = try? await SupabaseManager.shared.client.auth.session.user.id.uuidString else { return }
+        let client = SupabaseManager.shared.client
+
+        // 自分の最近(played_duration_seconds>=30 で ♥ 専用マーカー行を除外)
+        do {
+            myRecentTracks = try await client
+                .from("my_room_play_history")
+                .select()
+                .eq("user_id", value: userId)
+                .gte("played_duration_seconds", value: 30)
+                .order("played_at", ascending: false)
+                .limit(5)
+                .execute()
+                .value
+        } catch {
+            print("[SearchViewModel] loadEmptyStateData/myRecent error:", error)
+        }
+
+        // ふたりで最近(shared モード時のみ)
+        let pairId = roomViewModel.sharedPairId
+        if !pairId.isEmpty {
+            do {
+                sharedRecentTracks = try await client
+                    .from("shared_room_play_history")
+                    .select()
+                    .eq("pair_id", value: pairId)
+                    .order("played_at", ascending: false)
+                    .limit(5)
+                    .execute()
+                    .value
+            } catch {
+                print("[SearchViewModel] loadEmptyStateData/sharedRecent error:", error)
+            }
+        } else {
+            sharedRecentTracks = []
+        }
+
+        // おすすめのアーティスト: 履歴から top artists を抽出(出現頻度順、最大 6 件)
+        // アーティスト画像は履歴に無いため、その artist の最新再生の artwork_url(アルバム
+        // アート)を仮アバターとして流用する。Apple Music の artist artwork ID 取得は
+        // 別途検索が必要だが、UX としては「最近聴いたアルバム」が見える方が自然。
+        let combined = sharedRecentTracks + myRecentTracks
+        var counts: [String: Int] = [:]
+        var firstArtwork: [String: String] = [:]   // artistName → 最新の artwork_url
+        var order: [String] = []
+        for entry in combined {
+            let key = entry.artistName
+            counts[key, default: 0] += 1
+            if firstArtwork[key] == nil, let art = entry.artworkUrl {
+                firstArtwork[key] = art
+            }
+            if !order.contains(key) { order.append(key) }
+        }
+        let sorted = order.sorted { (counts[$0] ?? 0) > (counts[$1] ?? 0) }
+        suggestedArtists = sorted.prefix(6).map { name in
+            let url = firstArtwork[name].flatMap(URL.init(string:))
+            return Artist(id: "history-\(name)", name: name, artworkURL: url)
+        }
     }
 
     /// Apple Music 契約状態を確認。未契約なら searchError + subscriptionMissing を立てる。
@@ -69,6 +181,13 @@ final class SearchViewModel {
         onSearchTextChanged(lastQuery)
     }
 
+    /// TextField .onSubmit から呼ぶ。確定したクエリのみ「最近の検索」に追加する。
+    func submitSearch(_ term: String) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        addRecentSearch(trimmed)
+    }
+
     func selectSong(_ track: Track) {
         Task { await roomViewModel.playAsHost(track) }
     }
@@ -83,13 +202,54 @@ final class SearchViewModel {
         await roomViewModel.playNextInQueue(track)
     }
 
-    private func search(_ query: String) async {
-        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            isSearching = false
-            return
+    /// 日本語の文字(ひらがな/カタカナ/CJK 漢字)が含まれているかを判定。
+    /// ストアフロントを `jp` に強制するためのヒューリスティック。
+    /// 端末ロケールが US の場合でも、日本語クエリでは jp カタログを検索したい。
+    private static func containsJapanese(_ s: String) -> Bool {
+        for scalar in s.unicodeScalars {
+            let v = scalar.value
+            if (0x3040...0x309F).contains(v) ||   // Hiragana
+               (0x30A0...0x30FF).contains(v) ||   // Katakana
+               (0x4E00...0x9FFF).contains(v) ||   // CJK Unified Ideographs
+               (0xFF66...0xFF9F).contains(v) {    // Half-width katakana
+                return true
+            }
         }
-        let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
-        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/search?term=\(encoded)&types=songs,artists&limit=20&l=ja-JP&include[songs]=albums,artists") else {
+        return false
+    }
+
+    private func search(_ query: String) async {
+        // 日本語クエリは jp ストアフロント固定にしないと、US 等のストアフロントで
+        // 日本のアーティストがヒットしないことがある。
+        let storefront: String
+        if Self.containsJapanese(query) {
+            storefront = "jp"
+        } else {
+            storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
+        }
+        // URLComponents で組み立てて、queryItems のエスケープを正しく行う。
+        // 旧実装の "include[songs]" は `[`/`]` が URL ホストパース時に弾かれて
+        // URL(string:) が nil を返したり、Apple Music API が 400 を返すことがあったので
+        // queryItems で構築する方が安全。
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.music.apple.com"
+        components.path = "/v1/catalog/\(storefront)/search"
+        components.queryItems = [
+            URLQueryItem(name: "term", value: query),
+            URLQueryItem(name: "types", value: "songs,artists"),
+            URLQueryItem(name: "limit", value: "20"),
+            URLQueryItem(name: "l", value: "ja-JP"),
+            URLQueryItem(name: "include[songs]", value: "albums,artists"),
+        ]
+        // URLComponents は `[`/`]` を encode しないので、percentEncodedQuery を上書きして
+        // 確実に %5B / %5D にする。
+        if let percentQuery = components.percentEncodedQuery {
+            components.percentEncodedQuery = percentQuery
+                .replacingOccurrences(of: "[", with: "%5B")
+                .replacingOccurrences(of: "]", with: "%5D")
+        }
+        guard let url = components.url else {
             isSearching = false
             return
         }
@@ -100,6 +260,7 @@ final class SearchViewModel {
             songs = decoded.results.songs?.data.compactMap { $0.toTrack() } ?? []
             artists = decoded.results.artists?.data.compactMap { $0.toArtist() } ?? []
             searchError = nil
+            // 履歴には保存しない。確定(TextField .onSubmit)時のみ submitSearch() で追加する。
         } catch is CancellationError {
             return
         } catch let urlErr as URLError where urlErr.code == .cancelled {

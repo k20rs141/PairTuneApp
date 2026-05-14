@@ -107,8 +107,9 @@ final class RoomViewModel: Identifiable {
     /// 内部書き込みは private、QueueSheet 等の外部 read には許可する。
     private(set) var myUserId: String = ""
 
-    // Shared モード用
-    private var sharedPairId: String = ""
+    // Shared モード用。SearchViewModel が empty-state の shared_room_play_history を
+    // 引くために read-only で公開する(write は内部のみ)。
+    private(set) var sharedPairId: String = ""
     /// last-write-wins: 自分が最後に操作した日時。
     /// 受信 PlayState の hostTimestampMs よりも新しければ、相手の state を無視する。
     private var lastLocalActionAt: Date? = nil
