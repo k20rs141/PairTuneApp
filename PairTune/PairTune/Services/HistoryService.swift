@@ -100,6 +100,61 @@ final class HistoryService {
         }
     }
 
+    // MARK: - Solo: favorite
+
+    /// my_room_play_history のエントリの is_favorited を切り替える。
+    /// favorited=true なら favorited_at=NOW、false なら NULL にリセット。
+    /// RLS で user_id = auth.uid() の行のみ UPDATE 可能。
+    func toggleFavorite(entryId: String, userId: String, favorited: Bool) async -> Bool {
+        struct FavoriteUpdate: Encodable {
+            let isFavorited: Bool
+            let favoritedAt: String?
+            enum CodingKeys: String, CodingKey {
+                case isFavorited = "is_favorited"
+                case favoritedAt = "favorited_at"
+            }
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let payload = FavoriteUpdate(
+            isFavorited: favorited,
+            favoritedAt: favorited ? iso.string(from: Date()) : nil
+        )
+        do {
+            try await client
+                .from("my_room_play_history")
+                .update(payload)
+                .eq("id", value: entryId)
+                .eq("user_id", value: userId)
+                .execute()
+            return true
+        } catch {
+            print("[HistoryService] toggleFavorite error:", error)
+            return false
+        }
+    }
+
+    // MARK: - Partner favorites
+
+    /// partner_user_id の is_favorited な履歴を最新順で取得。
+    /// RLS で share_favorites=TRUE の時のみ取得可能(false なら 0 件)。
+    func fetchPartnerFavorites(partnerUserId: String, limit: Int = 10) async -> [PlayHistoryEntry] {
+        do {
+            return try await client
+                .from("my_room_play_history")
+                .select()
+                .eq("user_id", value: partnerUserId)
+                .eq("is_favorited", value: true)
+                .order("favorited_at", ascending: false)
+                .limit(limit)
+                .execute()
+                .value
+        } catch {
+            print("[HistoryService] fetchPartnerFavorites error:", error)
+            return []
+        }
+    }
+
     // MARK: - Solo: delete
 
     /// my_room_play_history から自分の 1 エントリを削除する。

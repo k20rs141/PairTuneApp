@@ -132,9 +132,11 @@ struct ContentView: View {
                         showSoloMode = true
                         Task {
                             let userId = authViewModel.session?.user.id.uuidString ?? ""
+                            let partnerId = pairViewModel.activePair?.partnerUserId(meId: userId.lowercased())
                             await soloHistoryVM.load(
                                 pairId: pairViewModel.activePair?.id,
-                                userId: userId
+                                userId: userId,
+                                partnerUserId: partnerId
                             )
                         }
                     },

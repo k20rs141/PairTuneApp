@@ -10,10 +10,33 @@ import Supabase
 final class SoloHistoryViewModel {
     var sharedHistory: [PlayHistoryEntry] = []
     var myRecent: [PlayHistoryEntry] = []
+    /// 相手の最近のお気に入り(`is_favorited=TRUE` を `share_favorites=TRUE` の partner から取得)。
+    /// `share_favorites=FALSE` の時は RLS で 0 件しか返らない。
+    var partnerFavorites: [PlayHistoryEntry] = []
     private(set) var hasLoaded = false
 
     private let client = SupabaseManager.shared.client
     private let historyService = HistoryService()
+
+    /// 「お気に入りに追加 / 解除」アクション。my_room_play_history の is_favorited を
+    /// トグルする。楽観更新 + 失敗時ロールバック。
+    func toggleFavorite(_ entry: PlayHistoryEntry, userId: String) async {
+        guard let idx = myRecent.firstIndex(where: { $0.id == entry.id }) else { return }
+        let previous = myRecent[idx].isFavorited ?? false
+        let next = !previous
+        myRecent[idx].isFavorited = next
+        myRecent[idx].favoritedAt = next ? Date() : nil
+
+        let ok = await historyService.toggleFavorite(
+            entryId: entry.id,
+            userId: userId,
+            favorited: next
+        )
+        if !ok {
+            myRecent[idx].isFavorited = previous
+            myRecent[idx].favoritedAt = entry.favoritedAt
+        }
+    }
 
     /// 「履歴から削除」アクションのハンドラ。my_room_play_history のエントリを
     /// 楽観的に myRecent から取り除き、Supabase 側でも DELETE する。
@@ -29,13 +52,25 @@ final class SoloHistoryViewModel {
         }
     }
 
+    /// 相手のお気に入りを取得する。`share_favorites=FALSE` の partner には RLS で
+    /// 0 件しか返らないので、UI 側で空ステートを出すことで OPT-IN の対応となる。
+    func loadPartnerFavorites(partnerUserId: String?) async {
+        guard let partnerUserId, !partnerUserId.isEmpty else {
+            partnerFavorites = []
+            return
+        }
+        partnerFavorites = await historyService.fetchPartnerFavorites(partnerUserId: partnerUserId)
+    }
+
     /// pairId がある場合は shared_room 履歴も取得。常に自分の my_room 履歴を取得。
-    func load(pairId: String?, userId: String) async {
+    /// partnerUserId が渡されたら相手のお気に入りも取得する。
+    func load(pairId: String?, userId: String, partnerUserId: String? = nil) async {
         guard !userId.isEmpty else { return }
         if let pid = pairId {
             await loadSharedHistory(pairId: pid)
         }
         await loadMyRecent(userId: userId)
+        await loadPartnerFavorites(partnerUserId: partnerUserId)
         hasLoaded = true
     }
 

@@ -103,6 +103,11 @@ struct SoloModeView: View {
                     track: entry.toTrack(),
                     partnerName: partnerName,
                     onClose: { contextEntry = nil },
+                    onFavorite: {
+                        // shared 由来エントリは toggleFavorite 内の firstIndex(where:) で
+                        // myRecent に見つからず early-return するので no-op になる。
+                        Task { await viewModel.toggleFavorite(entry, userId: userId) }
+                    },
                     onSendToPartner: { onPlayTrack(entry) },
                     onPlayNext: { onPlayTrack(entry) },
                     onRemoveFromHistory: isMyRecent ? {
@@ -115,7 +120,8 @@ struct SoloModeView: View {
         .navigationBarBackButtonHidden(true)
         .onAppear {
             // RoomView から pop してきた時にも履歴を最新化する。
-            Task { await viewModel.load(pairId: pairId, userId: userId) }
+            let partnerId = pair?.partnerUserId(meId: userId.lowercased())
+            Task { await viewModel.load(pairId: pairId, userId: userId, partnerUserId: partnerId) }
         }
         .navigationDestination(isPresented: $showMemoryAlbum) {
             if let pair {
@@ -307,18 +313,26 @@ struct SoloModeView: View {
             chip: "OPT-IN"
         )
 
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                // パートナーお気に入り API は v1.1 で実装。MVP では空表示。
-                EmptyStateCard(
-                    title: "まだ表示できません",
-                    hint: "v1.1 で実装予定",
-                    accent: .pairtuneSecondary
-                )
-                .frame(width: 280)
+        if viewModel.partnerFavorites.isEmpty {
+            EmptyStateCard(
+                title: "まだお気に入りがありません",
+                hint: "\(partnerName ?? "パートナー") さんが ♥ した曲がここに並びます",
+                accent: .pairtuneSecondary
+            )
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(viewModel.partnerFavorites) { entry in
+                        Button(action: { onPlayTrack(entry) }) {
+                            TrackCarouselCard(entry: entry, accent: .pairtuneSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
             }
+            .scrollClipDisabled()
         }
-        .scrollClipDisabled()
     }
 
     // MARK: - My recent section
@@ -342,7 +356,12 @@ struct SoloModeView: View {
             VStack(spacing: 1) {
                 ForEach(viewModel.myRecent) { entry in
                     Button(action: { onPlayTrack(entry) }) {
-                        TrackListItem(entry: entry)
+                        TrackListItem(
+                            entry: entry,
+                            onToggleFavorite: {
+                                Task { await viewModel.toggleFavorite(entry, userId: userId) }
+                            }
+                        )
                     }
                     .buttonStyle(.plain)
                     .simultaneousGesture(
@@ -524,6 +543,10 @@ private struct TrackCarouselCard: View {
 
 private struct TrackListItem: View {
     let entry: PlayHistoryEntry
+    /// ハートタップで favorite を toggle するハンドラ。nil の時はハートを出さない。
+    var onToggleFavorite: (() -> Void)? = nil
+
+    private var isFav: Bool { entry.isFavorited ?? false }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -542,9 +565,20 @@ private struct TrackListItem: View {
 
             Spacer()
 
-            Image(systemName: "play.fill")
-                .font(.system(size: 13))
-                .foregroundColor(Color(hex: "5A5566"))
+            if let onToggleFavorite {
+                Button(action: onToggleFavorite) {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(isFav ? .pairtunePrimary : Color(hex: "5A5566"))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(hex: "5A5566"))
+            }
         }
         .padding(.vertical, 9)
         .overlay(alignment: .bottom) {
