@@ -1,55 +1,54 @@
 import SwiftUI
 
-// MARK: - QueueSheet (v0.4 §2.15)
+// MARK: - QueueSheet (v0.4 §2.15 / screens-queue.jsx)
 //
-// Room 画面のキューボタンから開く bottom sheet。
-// セクション:
-//   1. Now Playing — 現再生中(波形 + PLAYING chip)
-//   2. Up Next     — キュー一覧(各行: # / art / 曲 / 追加者 / 長さ / ⋯)
-//   3. Recently played — このセッション内の履歴(相対時刻)
+// Room 画面の再生コントロール列のキューボタンから開く bottom sheet。
+// 3 セクション + footer hint card:
+//   1. 再生中 (Now playing) — gradient カード + 波形アニメ + PLAYING chip
+//   2. 次に再生 (Up next · N 曲) — drag handle / # / art / 曲 / 追加者 avatar / dur / ⋯
+//   3. このセッションで聴いた曲 (Recently played) — art opacity .85 / 曲 / "今" 等
 //
-// 操作:
-//   - 行タップ: その曲へスキップ(roomViewModel.playFromQueue)
-//   - ⋯: TrackContextMenu("次に再生" / "履歴から削除" 等)
-//   - 「+ 追加」: 検索を開いて末尾に追加(現 mode 継承)
-//   - drag handle: 並べ替え(.onMove)
-//
-// フッタ文言:
-//   - Shared: 「どちらも追加・並び替え・削除ができます。最後の操作が優先されます。」
-//   - Solo : 「キューはこの再生セッション内でのみ有効です。」
+// design source: /tmp/pairtune-design-v3/music-app/project/screens-queue.jsx
 
 struct QueueSheet: View {
     @Bindable var roomViewModel: RoomViewModel
     var recentlyPlayed: [PlayHistoryEntry] = []
     /// Shared モード時の partner.displayName(追加者アバターのフォールバックラベル用)
     var partnerName: String? = nil
+    /// 自分の uuid(追加者アバター判定に使う、 me / partner)
+    var myUserId: String = ""
     var onAddTap: () -> Void
     var onDismiss: () -> Void
 
     @State private var contextTrack: Track?
-    @State private var isReordering: Bool = false
+
+    private var isSolo: Bool { roomViewModel.mode == .solo }
 
     var body: some View {
         ZStack {
-            Color.pairtuneBase.ignoresSafeArea()
+            // 背景グラデ: surface → base
+            LinearGradient(
+                colors: [Color.pairtuneSurface, Color.pairtuneBase],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                handleBar
-                headerBar
+                grabber
+                header
+                hairline
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 0) {
                         nowPlayingSection
                         upNextSection
-                        if !recentlyPlayed.isEmpty {
-                            recentlyPlayedSection
-                        }
-                        footer
-                            .padding(.top, 4)
+                        recentlyPlayedSection
+                        footerHint
+                            .padding(.horizontal, 22)
+                            .padding(.top, 16)
+                            .padding(.bottom, 24)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 8)
-                    .padding(.bottom, 36)
                 }
+                .scrollIndicators(.hidden)
             }
 
             if let track = contextTrack {
@@ -74,60 +73,35 @@ struct QueueSheet: View {
         .presentationDragIndicator(.hidden)
     }
 
-    // MARK: - Top bar
+    // MARK: - Top
 
-    private var handleBar: some View {
-        RoundedRectangle(cornerRadius: 2.5)
+    private var grabber: some View {
+        RoundedRectangle(cornerRadius: 3)
             .fill(Color.white.opacity(0.18))
             .frame(width: 36, height: 5)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity)
     }
 
-    private var headerBar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("再生キュー")
-                    .font(.system(size: 17, weight: .semibold))
+    private var header: some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("キュー")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
                     .tracking(0.2)
-                Text(modeSubtitle)
-                    .font(.system(size: 10))
-                    .foregroundColor(Color(hex: "5A5566"))
-                    .tracking(0.6)
+                Text(subtitleText)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "7A7588"))
+                    .tracking(0.3)
             }
             Spacer()
-            Button(action: onAddTap) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("追加")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [.pairtunePrimary, .pairtuneSecondary],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: Color.pairtunePrimary.opacity(0.27), radius: 10, y: 4)
-                        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.5))
-                )
-            }
-            .buttonStyle(.plain)
-
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Color(hex: "A8A8A8"))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 32, height: 32)
                     .background(
                         Circle()
                             .fill(Color.white.opacity(0.05))
@@ -136,80 +110,125 @@ struct QueueSheet: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
+        .padding(.top, 4)
     }
 
-    private var modeSubtitle: String {
-        switch roomViewModel.mode {
-        case .shared: return "QUEUE · SHARED"
-        case .solo:   return "QUEUE · SOLO"
+    private var subtitleText: String {
+        if isSolo {
+            return "あなたのキュー · solo"
         }
+        return "ふたりのキュー · shared · 両方から操作できます"
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.05))
+            .frame(height: 0.5)
+    }
+
+    // MARK: - Section header
+
+    private func sectionHeader(_ ja: String, _ en: String, action: (() -> Void)? = nil, actionLabel: String? = nil) -> some View {
+        HStack(spacing: 0) {
+            Text(ja)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+                .tracking(0.3)
+            Text(" · \(en)")
+                .font(.system(size: 10.5))
+                .foregroundColor(Color(hex: "5A5566"))
+                .tracking(0.6)
+                .textCase(.uppercase)
+            Spacer()
+            if let action, let actionLabel {
+                Button(action: action) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(actionLabel)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(.pairtunePrimary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     // MARK: - Now playing
 
     @ViewBuilder
     private var nowPlayingSection: some View {
-        sectionHeader(icon: "waveform", title: "再生中", sub: "NOW PLAYING", accent: .pairtuneSecondary)
+        sectionHeader("再生中", "Now playing")
         if let track = roomViewModel.currentTrack {
-            HStack(spacing: 14) {
-                artworkView(
-                    url: track.artworkURL?.absoluteString,
-                    size: 64,
-                    accent: .pairtuneSecondary,
-                    stops: track.gradientStops
-                )
-                .shadow(color: Color.pairtuneSecondary.opacity(0.27), radius: 14, y: 6)
+            HStack(spacing: 12) {
+                ZStack {
+                    artworkView(
+                        url: track.artworkURL?.absoluteString,
+                        size: 48,
+                        stops: track.gradientStops
+                    )
+                    // Dark overlay + animated waveform
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.black.opacity(0.30))
+                        .frame(width: 48, height: 48)
+                    WaveformBars()
+                        .frame(width: 20, height: 14)
+                }
+                .shadow(color: .black.opacity(0.45), radius: 5, y: 2)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    playingChip
+                VStack(alignment: .leading, spacing: 2) {
                     Text(track.title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
                     Text(track.artist)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11.5))
                         .foregroundColor(Color(hex: "A8A8A8"))
                         .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 8)
+                Text("PLAYING")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.pairtunePrimary)
+                    .tracking(0.6)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.pairtunePrimary.opacity(0.11))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color.pairtunePrimary.opacity(0.30), lineWidth: 0.5)
+                            )
+                    )
             }
-            .padding(14)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Color.pairtuneSecondary.opacity(0.16), Color.pairtunePrimary.opacity(0.08)],
+                            colors: [Color.pairtunePrimary.opacity(0.12), Color.pairtuneSecondary.opacity(0.06)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.pairtuneSecondary.opacity(0.30), lineWidth: 0.5)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.pairtunePrimary.opacity(0.30), lineWidth: 0.5)
                     )
             )
+            .padding(.horizontal, 16)
         } else {
             placeholderCard(text: "再生中の曲はありません")
+                .padding(.horizontal, 18)
         }
-    }
-
-    private var playingChip: some View {
-        Text("PLAYING")
-            .font(.system(size: 8.5, weight: .bold))
-            .foregroundColor(.pairtuneSecondary)
-            .tracking(0.7)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.pairtuneSecondary.opacity(0.12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 5)
-                            .stroke(Color.pairtuneSecondary.opacity(0.30), lineWidth: 0.5)
-                    )
-            )
     }
 
     // MARK: - Up next
@@ -217,29 +236,49 @@ struct QueueSheet: View {
     @ViewBuilder
     private var upNextSection: some View {
         sectionHeader(
-            icon: "list.number",
-            title: "次に再生",
-            sub: "UP NEXT · \(roomViewModel.queue.items.count)",
-            accent: .pairtunePrimary
+            "次に再生",
+            "Up next · \(roomViewModel.queue.items.count) 曲",
+            action: onAddTap,
+            actionLabel: "追加"
         )
 
         if roomViewModel.queue.items.isEmpty {
-            placeholderCard(text: "キューに曲がありません。「+ 追加」から曲を加えましょう。")
+            VStack(spacing: 6) {
+                Text("キューは空です")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(hex: "7A7588"))
+                Text("検索から曲を追加してください")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(Color(hex: "5A5566"))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.025))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.pairtunePrimary.opacity(0.15), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
+                    )
+            )
+            .padding(.horizontal, 18)
         } else {
-            // List + onMove で並べ替え。背景透過してカスタム見た目を保つ。
+            // List + onMove + EditMode.active で drag-to-reorder を有効化。
+            // 背景は scrollContentBackground(.hidden) と listRowBackground(.clear) で
+            // 完全に透明化してデザインを保つ。
             List {
-                ForEach(Array(roomViewModel.queue.items.enumerated()), id: \.element.id) { idx, item in
-                    queueRow(item: item, index: idx)
+                ForEach(roomViewModel.queue.items) { item in
+                    let idx = roomViewModel.queue.items.firstIndex(where: { $0.id == item.id }) ?? 0
+                    upNextRow(item: item, position: idx + 1)
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
                         .listRowSeparator(.hidden)
                 }
                 .onMove { from, to in
-                    Task {
-                        var newItems = roomViewModel.queue.items
-                        newItems.move(fromOffsets: from, toOffset: to)
-                        await roomViewModel.queue.reorder(newItems)
-                    }
+                    var newItems = roomViewModel.queue.items
+                    newItems.move(fromOffsets: from, toOffset: to)
+                    Task { await roomViewModel.queue.reorder(newItems) }
                 }
                 .onDelete { offsets in
                     Task {
@@ -258,185 +297,214 @@ struct QueueSheet: View {
         }
     }
 
-    private func queueRow(item: QueueItem, index: Int) -> some View {
-        // 行タップで再生、⋯ ボタンタップで context menu を出す。
-        // 行全体を Button にすると ⋯ の Button タップが行 Button にも伝播して
-        // 両方発火するため、行は Button、⋯ はその内側に置く(SwiftUI は内側 Button
-        // のタップを優先的にハンドルし、外側 Button に伝播しない)。
-        Button {
-            Task { await roomViewModel.playFromQueue(item) }
-        } label: {
-            HStack(spacing: 10) {
-                Text("\(index + 1)")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Color(hex: "7A7588"))
-                    .frame(width: 18)
-                    .monospacedDigit()
-
-                artworkView(
-                    url: item.artworkUrl,
-                    size: 40,
-                    accent: .pairtunePrimary,
-                    stops: [
-                        .init(color: .pairtunePrimary, location: 0),
-                        .init(color: Color(hex: "4A1D3D"), location: 1),
-                    ]
-                )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.songTitle)
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    Text(item.artistName)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "7A7588"))
-                        .lineLimit(1)
+    private func upNextRow(item: QueueItem, position: Int) -> some View {
+        HStack(spacing: 11) {
+            // Drag handle (visual only — drag-reorder は MVP では省略)
+            VStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Rectangle()
+                        .fill(Color(hex: "3F3F4A"))
+                        .frame(width: 14, height: 1)
                 }
-                Spacer(minLength: 0)
-
-                if let dur = item.durationSeconds {
-                    Text(fmt(dur))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color(hex: "5A5566"))
-                        .monospacedDigit()
-                }
-
-                Button {
-                    contextTrack = item.toTrack()
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color(hex: "5A5566"))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.025))
-            )
-            .contentShape(Rectangle())
+
+            Text("\(position)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Color(hex: "5A5566"))
+                .frame(width: 14, alignment: .trailing)
+                .monospacedDigit()
+
+            Button {
+                Task { await roomViewModel.playFromQueue(item) }
+            } label: {
+                HStack(spacing: 11) {
+                    artworkView(
+                        url: item.artworkUrl,
+                        size: 40,
+                        stops: [
+                            .init(color: .pairtunePrimary, location: 0),
+                            .init(color: Color(hex: "4A1D3D"), location: 1),
+                        ]
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.songTitle)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        Text(item.artistName)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "7A7588"))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    if !isSolo, let added = item.addedBy {
+                        adderAvatar(addedBy: added)
+                    }
+                    if let dur = item.durationSeconds {
+                        Text(fmt(dur))
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundColor(Color(hex: "5A5566"))
+                            .monospacedDigit()
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                contextTrack = item.toTrack()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(hex: "5A5566"))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private func adderAvatar(addedBy: String) -> some View {
+        let isMe = addedBy == myUserId
+        let initials = isMe ? "YO" : initialsForPartner()
+        let baseColor = isMe ? Color.pairtunePrimary : Color.pairtuneSecondary
+        return ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [baseColor, baseColor.opacity(0.66)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(Circle().stroke(Color.black.opacity(0.3), lineWidth: 1))
+            Text(initials)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundColor(Color(hex: "0A0612"))
+        }
+        .frame(width: 20, height: 20)
+    }
+
+    private func initialsForPartner() -> String {
+        // partnerName の先頭 1 文字を取って大文字 2 文字風に
+        guard let name = partnerName, let first = name.first else { return "PA" }
+        let s = String(first).uppercased()
+        return s + s
     }
 
     // MARK: - Recently played
 
     @ViewBuilder
     private var recentlyPlayedSection: some View {
-        sectionHeader(
-            icon: "clock.arrow.circlepath",
-            title: "最近の再生",
-            sub: "RECENTLY PLAYED",
-            accent: Color(hex: "7A7588")
-        )
-        VStack(spacing: 4) {
-            ForEach(recentlyPlayed.prefix(8)) { entry in
-                HStack(spacing: 10) {
-                    artworkView(
-                        url: entry.artworkUrl,
-                        size: 36,
-                        accent: Color(hex: "7A7588"),
-                        stops: [
-                            .init(color: Color(hex: "3A3548"), location: 0),
-                            .init(color: Color(hex: "1F1A30"), location: 1),
-                        ]
-                    )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(entry.songTitle)
-                            .font(.system(size: 12.5))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Text(entry.artistName)
-                            .font(.system(size: 10.5))
-                            .foregroundColor(Color(hex: "7A7588"))
-                            .lineLimit(1)
+        sectionHeader("このセッションで聴いた曲", "Recently played")
+        if recentlyPlayed.isEmpty {
+            Text("まだ何も再生していません")
+                .font(.system(size: 11))
+                .foregroundColor(Color(hex: "5A5566"))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 14)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(recentlyPlayed.prefix(8)) { entry in
+                    Button {
+                        // タップで再開: Track を組み立てて再生
+                        Task { await roomViewModel.playAsHost(entry.toTrack()) }
+                    } label: {
+                        recentRow(entry)
                     }
-                    Spacer()
-                    Text(relativeTime(entry.playedAt))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color(hex: "5A5566"))
+                    .buttonStyle(.plain)
+                    if entry.id != recentlyPlayed.prefix(8).last?.id {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.04))
+                            .frame(height: 0.5)
+                            .padding(.leading, 67)
+                    }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
             }
         }
     }
 
-    // MARK: - Footer
+    private func recentRow(_ entry: PlayHistoryEntry) -> some View {
+        HStack(spacing: 11) {
+            artworkView(
+                url: entry.artworkUrl,
+                size: 38,
+                stops: [
+                    .init(color: Color(hex: "3A3548"), location: 0),
+                    .init(color: Color(hex: "1F1A30"), location: 1),
+                ]
+            )
+            .opacity(0.85)
 
-    private var footer: some View {
-        Text(footerText)
-            .font(.system(size: 10.5))
-            .foregroundColor(Color(hex: "5A5566"))
-            .multilineTextAlignment(.leading)
-            .lineSpacing(3)
-            .padding(.top, 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.songTitle)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(entry.artistName)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "7A7588"))
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text(relativeTime(entry.playedAt))
+                .font(.system(size: 10))
+                .foregroundColor(Color(hex: "5A5566"))
+                .tracking(0.3)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 
-    private var footerText: String {
-        switch roomViewModel.mode {
-        case .shared:
-            return "どちらも追加・並び替え・削除ができます。最後の操作が優先されます。"
-        case .solo:
-            return "キューはこの再生セッション内でのみ有効です。"
-        }
+    // MARK: - Footer hint
+
+    private var footerHint: some View {
+        Text(isSolo
+            ? "キューはこの再生セッション内でのみ有効です。"
+            : "どちらも追加・並び替え・削除ができます。最後の操作が優先されます。")
+            .font(.system(size: 10.5))
+            .foregroundColor(Color(hex: "7A7588"))
+            .lineSpacing(3)
+            .tracking(0.2)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.025))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
+                    )
+            )
     }
 
     // MARK: - Helpers
-
-    private func sectionHeader(icon: String, title: String, sub: String, accent: Color) -> some View {
-        HStack(spacing: 9) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(accent.opacity(0.11))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(accent.opacity(0.30), lineWidth: 0.5)
-                    )
-                    .frame(width: 22, height: 22)
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(accent)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundColor(.white)
-                Text(sub)
-                    .font(.system(size: 10))
-                    .foregroundColor(Color(hex: "5A5566"))
-                    .tracking(0.5)
-            }
-            Spacer()
-        }
-    }
 
     private func placeholderCard(text: String) -> some View {
         Text(text)
             .font(.system(size: 12))
             .foregroundColor(Color(hex: "7A7588"))
             .multilineTextAlignment(.center)
-            .lineSpacing(3)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
-            .padding(.horizontal, 16)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.white.opacity(0.025))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.06), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
+                            .stroke(Color.white.opacity(0.05), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
                     )
             )
     }
 
     @ViewBuilder
-    private func artworkView(url: String?, size: CGFloat, accent: Color, stops: [Gradient.Stop]) -> some View {
+    private func artworkView(url: String?, size: CGFloat, stops: [Gradient.Stop]) -> some View {
         Group {
             if let urlStr = url, let u = URL(string: urlStr) {
                 AsyncImage(url: u) { phase in
@@ -452,9 +520,9 @@ struct QueueSheet: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: size > 40 ? 8 : 6, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: size > 40 ? 8 : 6, style: .continuous)
                 .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
         )
     }
@@ -467,6 +535,34 @@ struct QueueSheet: View {
         case ..<3600:      return "\(elapsed / 60) 分前"
         case ..<86400:     return "\(elapsed / 3600) 時間前"
         default:           return "\(elapsed / 86400) 日前"
+        }
+    }
+}
+
+// MARK: - Animated waveform (4 bars)
+
+private struct WaveformBars: View {
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                let barWidth: CGFloat = 2
+                let spacing: CGFloat = 3
+                let centerY = size.height / 2
+                for i in 0..<4 {
+                    let phase = Double(i) * 0.25
+                    let rawHeight = sin(t * 4 + phase) * 0.5 + 0.5  // 0..1
+                    let height = CGFloat(3 + rawHeight * 8)        // 3..11
+                    let x = CGFloat(i) * (barWidth + spacing)
+                    let rect = CGRect(x: x, y: centerY - height / 2, width: barWidth, height: height)
+                    ctx.fill(
+                        Path(roundedRect: rect, cornerRadius: 1),
+                        with: .color(.white)
+                    )
+                }
+            }
         }
     }
 }

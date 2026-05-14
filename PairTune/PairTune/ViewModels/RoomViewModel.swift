@@ -104,7 +104,8 @@ final class RoomViewModel: Identifiable {
     private var eventListenerTask: Task<Void, Never>?
 
     // 両モード共通: 自分の userId。enterRoom 時に設定する。
-    private var myUserId: String = ""
+    /// 内部書き込みは private、QueueSheet 等の外部 read には許可する。
+    private(set) var myUserId: String = ""
 
     // Shared モード用
     private var sharedPairId: String = ""
@@ -314,6 +315,29 @@ final class RoomViewModel: Identifiable {
         if sessionRecentlyPlayed.count > 8 {
             sessionRecentlyPlayed = Array(sessionRecentlyPlayed.prefix(8))
         }
+    }
+
+    /// Prev / Next ボタン長押し時の相対シーク。±5 秒。
+    /// shared モードでは個別 broadcast せず、通常の 2 秒間隔の broadcast で相手にも届く。
+    /// 末尾を超えたら auto-advance に任せて次の曲へ。
+    func seekBy(_ delta: TimeInterval) {
+        musicService.seek(by: delta)
+    }
+
+    /// Next ボタン: キュー先頭を取り出して再生(自動進行と同じロジック)。
+    /// キューが空なら何もしない。
+    func playNextFromQueue() async {
+        if let next = await queue.popFirst() {
+            await playAsHost(next.toTrack())
+        }
+    }
+
+    /// Prev ボタン: sessionRecentlyPlayed の先頭(直近に切替えられた曲)へ戻す。
+    /// 復帰した曲は recently から外し、現再生中の曲は新しい先頭に入れる。
+    func playPreviousFromHistory() async {
+        guard let prev = sessionRecentlyPlayed.first else { return }
+        sessionRecentlyPlayed.removeFirst()
+        await playAsHost(prev.toTrack())
     }
 
     /// 検索結果やコンテキストメニューから「キューに追加」する。

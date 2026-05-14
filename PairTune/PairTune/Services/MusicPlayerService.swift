@@ -87,6 +87,14 @@ final class MusicPlayerService {
         currentPlaybackTime = time
     }
 
+    /// 相対シーク。Prev / Next ボタン長押し時に呼ぶ(±5 秒程度)。
+    /// 0 未満になったら 0 にクランプ。currentSong.duration を超えたら ±5 秒ずつ後ろに進める。
+    func seek(by delta: TimeInterval) {
+        let next = max(0, player.playbackTime + delta)
+        player.playbackTime = next
+        currentPlaybackTime = next
+    }
+
     func currentTime() -> TimeInterval {
         player.playbackTime
     }

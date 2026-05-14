@@ -242,31 +242,9 @@ struct RoomView: View {
 
             Spacer()
 
-            HStack(spacing: 8) {
-                // キューボタン: 右端の share の隣に配置。未再生数のドットを overlay。
-                ZStack(alignment: .topTrailing) {
-                    FrostedCircleButton(icon: "text.line.first.and.arrowtriangle.forward", size: 38) {
-                        showQueue = true
-                    }
-                    let count = roomViewModel.queue.items.count
-                    if count > 0 {
-                        Text("\(count)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5)
-                            .frame(minWidth: 14, minHeight: 14)
-                            .background(
-                                Capsule()
-                                    .fill(Color.pairtunePrimary)
-                                    .overlay(Capsule().stroke(Color.pairtuneBase, lineWidth: 1.5))
-                            )
-                            .offset(x: 4, y: -4)
-                    }
-                }
-
-                FrostedCircleButton(icon: "square.and.arrow.up", size: 38) {
-                    showToast("招待リンクをシェア · Share invite")
-                }
+            // ヘッダ右上は share ボタンのみ(キューは playback controls に置く設計 §2.15)。
+            FrostedCircleButton(icon: "square.and.arrow.up", size: 38) {
+                showToast("招待リンクをシェア · Share invite")
             }
         }
         .padding(.horizontal, 16)
@@ -393,47 +371,100 @@ struct RoomView: View {
                     )
                 }
             } else if syncState != .disconnected {
-                HStack(spacing: 14) {
+                // §2.15 デザイン: search(44) / prev(48) / play(68) / next(48) / queue(44+badge)
+                HStack(spacing: 10) {
                     // Search
                     Button { showSearch = true } label: {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 19, weight: .regular))
+                            .font(.system(size: 17, weight: .regular))
+                            .foregroundColor(Color(hex: "A8A8A8"))
+                            .frame(width: 44, height: 44)
+                            .background(
+                                Circle()
+                                    .fill(Color.white.opacity(0.05))
+                                    .overlay(Circle().stroke(Color.pairtunePrimary.opacity(0.13), lineWidth: 0.5))
+                            )
+                    }
+
+                    // Prev: タップ=前の曲、長押し=連続巻き戻し(-5s/tick)
+                    HoldButton(
+                        onTap: { Task { await roomViewModel.playPreviousFromHistory() } },
+                        onHoldTick: { Task { await roomViewModel.seekBy(-5) } }
+                    ) {
+                        Image(systemName: "backward.fill")
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white)
-                            .frame(width: 52, height: 52)
+                            .frame(width: 48, height: 48)
                             .background(
                                 Circle()
                                     .fill(Color.white.opacity(0.06))
-                                    .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 0.5))
+                                    .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 0.5))
                             )
                     }
 
                     // Play / Pause
                     Button { togglePlayback() } label: {
                         Image(systemName: isPaused ? "play.fill" : "pause.fill")
-                            .font(.system(size: 24, weight: .medium))
+                            .font(.system(size: 26, weight: .medium))
                             .foregroundColor(.white)
                             .frame(width: 68, height: 68)
                             .background(
                                 Circle()
-                                    .fill(Color.pairtuneCoral)
-                                    .shadow(color: Color.pairtuneCoral.opacity(0.55), radius: 18, y: 4)
-                                    .overlay(
-                                        Circle().stroke(Color.white.opacity(0.22), lineWidth: 0.5)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.pairtunePrimary, .pairtuneSecondary],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
+                                    .shadow(color: Color.pairtunePrimary.opacity(0.33), radius: 18, y: 4)
+                                    .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 0.5))
                             )
                     }
 
-                    // Music note (future: queue)
-                    Button { } label: {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 19, weight: .regular))
-                            .foregroundColor(.pairtuneTextSecondary)
-                            .frame(width: 52, height: 52)
+                    // Next: タップ=次の曲(キュー先頭)、長押し=連続早送り(+5s/tick)
+                    HoldButton(
+                        onTap: { Task { await roomViewModel.playNextFromQueue() } },
+                        onHoldTick: { Task { await roomViewModel.seekBy(5) } }
+                    ) {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 48, height: 48)
                             .background(
                                 Circle()
                                     .fill(Color.white.opacity(0.06))
-                                    .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 0.5))
+                                    .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 0.5))
                             )
+                    }
+
+                    // Queue with unplayed-count badge
+                    ZStack(alignment: .topTrailing) {
+                        Button { showQueue = true } label: {
+                            Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundColor(Color(hex: "A8A8A8"))
+                                .frame(width: 44, height: 44)
+                                .background(
+                                    Circle()
+                                        .fill(Color.white.opacity(0.05))
+                                        .overlay(Circle().stroke(Color.pairtunePrimary.opacity(0.13), lineWidth: 0.5))
+                                )
+                        }
+                        let count = roomViewModel.queue.items.count
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 3)
+                                .frame(minWidth: 14, minHeight: 14)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.pairtunePrimary)
+                                        .overlay(Capsule().stroke(Color.pairtuneBase, lineWidth: 1.5))
+                                )
+                                .offset(x: 2, y: -2)
+                        }
                     }
                 }
             }
