@@ -11,7 +11,7 @@ final class ArtistDetailViewModel {
     var isLoading: Bool = false
     var loadError: String?
 
-    private let roomViewModel: RoomViewModel
+    let roomViewModel: RoomViewModel
     private var loadTask: Task<Void, Never>?
 
     init(artist: Artist, roomViewModel: RoomViewModel) {

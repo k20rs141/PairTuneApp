@@ -8,6 +8,10 @@ struct RoomView: View {
     var guestJoining: Bool = false
     var meName: String = "You"
     var partnerName: String? = nil
+    /// 自分の avatar 画像 URL(profiles.avatar_url)。nil の時はイニシャル fallback。
+    var myAvatarUrl: String? = nil
+    /// 相手の avatar 画像 URL。
+    var partnerAvatarUrl: String? = nil
     var onExit: () -> Void
     var onSelectTrack: (Track) -> Void
 
@@ -26,6 +30,8 @@ struct RoomView: View {
         guestJoining: Bool = false,
         meName: String = "You",
         partnerName: String? = nil,
+        myAvatarUrl: String? = nil,
+        partnerAvatarUrl: String? = nil,
         onExit: @escaping () -> Void,
         onSelectTrack: @escaping (Track) -> Void
     ) {
@@ -35,6 +41,8 @@ struct RoomView: View {
         self.guestJoining = guestJoining
         self.meName = meName
         self.partnerName = partnerName
+        self.myAvatarUrl = myAvatarUrl
+        self.partnerAvatarUrl = partnerAvatarUrl
         self.onExit = onExit
         self.onSelectTrack = onSelectTrack
         _searchViewModel = State(initialValue: SearchViewModel(roomViewModel: roomViewModel))
@@ -323,26 +331,16 @@ struct RoomView: View {
     }
 
     private func participantBadge(name: String, isMe: Bool) -> some View {
-        VStack(spacing: 5) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: isMe
-                                ? [Color.pairtunePrimary, Color.pairtunePrimary.opacity(0.65)]
-                                : [Color.pairtuneSecondary, Color.pairtuneSecondary.opacity(0.65)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Text(String(name.prefix(2)).uppercased())
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.pairtuneBase)
-                    )
-                    .overlay(Circle().stroke(Color(hex: "1A1A1A"), lineWidth: 1.5))
-            }
+        let url = (isMe ? myAvatarUrl : partnerAvatarUrl).flatMap(URL.init(string:))
+        return VStack(spacing: 5) {
+            RemoteAvatarView(
+                url: url,
+                initials: String(name.prefix(2)).uppercased(),
+                color: isMe ? .pairtunePrimary : .pairtuneSecondary,
+                size: 40,
+                strokeColor: Color(hex: "1A1A1A"),
+                strokeWidth: 1.5
+            )
             Text(name)
                 .font(.system(size: 10.5))
                 .foregroundColor(isMe ? .white : .pairtuneTextSecondary)

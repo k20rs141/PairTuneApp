@@ -114,6 +114,8 @@ struct ContentView: View {
                     pairingCode: authViewModel.pairingCode,
                     myName: authViewModel.currentProfile?.displayName,
                     partnerName: pairViewModel.partnerProfile?.displayName,
+                    myAvatarUrl: authViewModel.currentProfile?.avatarUrl,
+                    partnerAvatarUrl: pairViewModel.partnerProfile?.avatarUrl,
                     // MVP: presence 未実装。partnerProfile が解決した時点で online とする。
                     // 将来は Realtime Presence や `last_seen_at` で実装。
                     partnerOnline: pairViewModel.partnerProfile != nil,
@@ -342,6 +344,8 @@ private struct RoomViewWrapper: View {
             guestJoining: !roomViewModel.isHost,
             meName: authViewModel.currentProfile?.displayName ?? "あなた",
             partnerName: pairViewModel.partnerProfile?.displayName,
+            myAvatarUrl: authViewModel.currentProfile?.avatarUrl,
+            partnerAvatarUrl: pairViewModel.partnerProfile?.avatarUrl,
             onExit: onExit,
             onSelectTrack: { _ in }
         )

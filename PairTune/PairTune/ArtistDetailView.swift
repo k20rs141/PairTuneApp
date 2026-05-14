@@ -405,21 +405,39 @@ struct ArtistDetailView: View {
     // MARK: - Top songs header
 
     private var topSongsHeader: some View {
-        HStack(spacing: 6) {
-            Text("トップソング")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.white)
-                .tracking(0.2)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color(hex: "7A7588"))
-            Text("TOP SONGS")
-                .font(.system(size: 10.5))
-                .foregroundColor(Color(hex: "5A5566"))
-                .tracking(0.5)
-                .padding(.leading, 4)
-            Spacer()
+        // タップで「全曲」一覧へ push。NavigationLink で ArtistAllSongsView を開く。
+        NavigationLink {
+            ArtistAllSongsView(
+                viewModel: ArtistAllSongsViewModel(
+                    artist: viewModel.artist,
+                    roomViewModel: viewModel.roomViewModel
+                ),
+                partnerName: partnerName,
+                onSelectTrack: onSelectTrack,
+                onSelectAlbum: onSelectAlbum
+            )
+        } label: {
+            HStack(spacing: 6) {
+                Text("トップソング")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .tracking(0.2)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(hex: "7A7588"))
+                Text("TOP SONGS")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(Color(hex: "5A5566"))
+                    .tracking(0.5)
+                    .padding(.leading, 4)
+                Spacer()
+                Text("もっと見る")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "7A7588"))
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private func sectionHeader(_ ja: String, _ en: String) -> some View {

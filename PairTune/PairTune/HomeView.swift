@@ -22,6 +22,10 @@ struct HomeView: View {
 
     /// パートナーの表示名(state B 表示用)。nil なら state A。
     var partnerName: String? = nil
+    /// 自分の avatar 画像 URL(profiles.avatar_url)。nil の時はイニシャル fallback。
+    var myAvatarUrl: String? = nil
+    /// 相手の avatar 画像 URL。
+    var partnerAvatarUrl: String? = nil
 
     /// パートナーのオンライン状況。true: online(緑ドット + 接続波 active)/
     /// false: offline(グレードット + 接続波 dim + アバター dim)
@@ -84,15 +88,15 @@ struct HomeView: View {
             }
             Spacer()
             Button(action: onProfile) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundColor(.pairtuneTextSecondary)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(0.05))
-                            .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 0.5))
-                    )
+                // ユーザーのアバター(設定で変更可能)を表示。URL 無しならイニシャルでフォールバック。
+                RemoteAvatarView(
+                    url: myAvatarUrl.flatMap(URL.init(string:)),
+                    initials: initialOf(myName ?? "YO"),
+                    color: .pairtunePrimary,
+                    size: 36,
+                    strokeColor: Color.white.opacity(0.08),
+                    strokeWidth: 0.5
+                )
             }
         }
         .padding(.horizontal, 22)
@@ -140,8 +144,24 @@ struct HomeView: View {
                 Color.clear.frame(height: 88)
 
                 HStack(spacing: 22) {
-                    homeAvatar(initial: initialOf(myName ?? "YO"), color: .pairtunePrimary, dim: false)
-                    homeAvatar(initial: initialOf(partnerName), color: Color(hex: "FF6B9D"), dim: !partnerOnline)
+                    RemoteAvatarView(
+                        url: myAvatarUrl.flatMap(URL.init(string:)),
+                        initials: initialOf(myName ?? "YO"),
+                        color: .pairtunePrimary,
+                        size: 62,
+                        strokeColor: Color.white.opacity(0.08),
+                        strokeWidth: 1.5,
+                        dim: false
+                    )
+                    RemoteAvatarView(
+                        url: partnerAvatarUrl.flatMap(URL.init(string:)),
+                        initials: initialOf(partnerName),
+                        color: Color(hex: "FF6B9D"),
+                        size: 62,
+                        strokeColor: Color.white.opacity(0.08),
+                        strokeWidth: 1.5,
+                        dim: !partnerOnline
+                    )
                 }
 
                 // connector wave between the two

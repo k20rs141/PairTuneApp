@@ -198,6 +198,65 @@ private struct SyncWaveCanvas: View {
     }
 }
 
+// MARK: - RemoteAvatar
+//
+// URL があれば AsyncImage、無ければ gradient + initials のフォールバック。
+// HomeView / RoomView / QueueSheet の参加者表示で共通利用する。
+
+struct RemoteAvatarView: View {
+    /// `profiles.avatar_url` 等から渡す。nil の時はイニシャル fallback。
+    let url: URL?
+    /// fallback 表示用のイニシャル(2 文字目安)。
+    let initials: String
+    /// fallback 時の gradient ベース色。
+    let color: Color
+    var size: CGFloat = 40
+    /// 外周ストロークの色(リング表現用、nil で出さない)。
+    var strokeColor: Color? = Color(hex: "1A1A1A")
+    var strokeWidth: CGFloat = 1.5
+    /// オフライン等で dim 表示にする。
+    var dim: Bool = false
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    default:
+                        fallback
+                    }
+                }
+            } else {
+                fallback
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay {
+            if let strokeColor {
+                Circle().stroke(strokeColor, lineWidth: strokeWidth)
+            }
+        }
+        .opacity(dim ? 0.55 : 1.0)
+        .saturation(dim ? 0.5 : 1.0)
+    }
+
+    private var fallback: some View {
+        ZStack {
+            LinearGradient(
+                colors: [color, color.opacity(0.65)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Text(initials)
+                .font(.system(size: size * 0.36, weight: .semibold))
+                .foregroundColor(.pairtuneBase)
+        }
+    }
+}
+
 // MARK: - Avatar
 
 struct AvatarView: View {

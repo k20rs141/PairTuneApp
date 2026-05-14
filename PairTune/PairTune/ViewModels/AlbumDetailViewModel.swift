@@ -51,9 +51,16 @@ final class AlbumDetailViewModel {
         }
     }
 
+    /// アルバム全曲を再生する。先頭曲を即時再生し、残りはキュー末尾に追加。
+    /// Shared モードでは Realtime 経由で相手のキューにも同期される。
     func playAll() {
         guard let first = tracks.first else { return }
-        Task { await roomViewModel.playAsHost(first) }
+        Task {
+            await roomViewModel.playAsHost(first)
+            for track in tracks.dropFirst() {
+                await roomViewModel.addToQueue(track)
+            }
+        }
     }
 
     func play(_ track: Track) {
