@@ -45,7 +45,7 @@ struct ProfileView: View {
     @State private var showDeleteConfirm1 = false
     @State private var showDeleteConfirm2 = false
     @State private var isDeleting = false
-    @State private var showEndPairConfirm = false
+    @State private var showUnpairDialog = false
     @State private var isEndingPair = false
 
     @FocusState private var nameFocused: Bool
@@ -80,6 +80,20 @@ struct ProfileView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
                 .padding(.bottom, 60)
+            }
+
+            if showUnpairDialog {
+                UnpairDialog(
+                    partnerName: pairViewModel.partnerProfile?.displayName,
+                    onCommit: { choice in
+                        await runEndPair(choice: choice)
+                    },
+                    onDismiss: {
+                        showUnpairDialog = false
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(120)
             }
         }
         .navigationTitle("設定")
@@ -127,17 +141,6 @@ struct ProfileView: View {
             Button("キャンセル", role: .cancel) {}
         } message: {
             Text("削除すると元に戻せません。")
-        }
-        .confirmationDialog(
-            "ペアリングを解消しますか?",
-            isPresented: $showEndPairConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("解消する(思い出を残す)") { runEndPair(preserve: true) }
-            Button("解消する(履歴も削除)", role: .destructive) { runEndPair(preserve: false) }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            Text("「思い出を残す」を選ぶと、これまでの再生履歴は閲覧専用で残ります。\n「履歴も削除」を選ぶと 90 日後に完全削除されます。")
         }
     }
 
@@ -382,7 +385,7 @@ struct ProfileView: View {
                 .fill(Color.white.opacity(0.05))
                 .frame(height: 1)
 
-            Button(role: .destructive, action: { showEndPairConfirm = true }) {
+            Button(role: .destructive, action: { showUnpairDialog = true }) {
                 HStack(spacing: 8) {
                     if isEndingPair { SpinnerView(color: .pairtuneSyncBad, size: 14) }
                     Text("ペアリングを解消…")
@@ -587,12 +590,14 @@ struct ProfileView: View {
 
     // MARK: - Helpers
 
-    private func runEndPair(preserve: Bool) {
+    /// UnpairDialog の「思い出はどうしますか?」で選択された choice をもとに
+    /// PairViewModel.endActivePair を呼ぶ。成功なら true を返し、UnpairDialog 側で
+    /// Done step に遷移する。
+    private func runEndPair(choice: UnpairChoice) async -> Bool {
         isEndingPair = true
-        Task {
-            _ = await pairViewModel.endActivePair(preserveMemories: preserve)
-            isEndingPair = false
-        }
+        let ok = await pairViewModel.endActivePair(preserveMemories: choice.preserveMemories)
+        isEndingPair = false
+        return ok
     }
 }
 
