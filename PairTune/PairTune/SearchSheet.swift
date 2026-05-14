@@ -5,6 +5,10 @@ struct SearchSheet: View {
     var viewModel: SearchViewModel
     /// Shared モードで partner がいる時のみ「相手に送る」CTA / Action sheet を表示する。
     var partnerName: String? = nil
+    /// 設定すると、曲タップ時のデフォルト挙動(viewModel.selectSong = playAsHost)を
+    /// 上書きする。QueueSheet の「+ 追加」から開いた時に「再生せずキューに追加」する
+    /// ために使う。
+    var onSelectTrack: ((Track) -> Void)? = nil
 
     @State private var query: String = ""
     @State private var navPath = NavigationPath()
@@ -231,7 +235,11 @@ struct SearchSheet: View {
                             ForEach(viewModel.songs) { track in
                                 Button {
                                     isPresented = false
-                                    viewModel.selectSong(track)
+                                    if let onSelectTrack {
+                                        onSelectTrack(track)
+                                    } else {
+                                        viewModel.selectSong(track)
+                                    }
                                 } label: {
                                     TrackRow(track: track)
                                 }

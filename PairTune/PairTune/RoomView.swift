@@ -13,6 +13,8 @@ struct RoomView: View {
 
     @State private var toastMessage: String? = nil
     @State private var showSearch: Bool = false
+    @State private var showQueue: Bool = false
+    @State private var showSearchForQueue: Bool = false
     @State private var showDebug: Bool = false
     @State private var showExitConfirm: Bool = false
     @State private var searchViewModel: SearchViewModel
@@ -147,6 +149,31 @@ struct RoomView: View {
         } message: {
             Text("バックグラウンドでも再生は継続します。停止したい時は一時停止してから閉じてください。")
         }
+        .sheet(isPresented: $showQueue) {
+            QueueSheet(
+                roomViewModel: roomViewModel,
+                partnerName: roomViewModel.mode == .shared ? partnerName : nil,
+                onAddTap: {
+                    showQueue = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showSearchForQueue = true
+                    }
+                },
+                onDismiss: { showQueue = false }
+            )
+        }
+        .sheet(isPresented: $showSearchForQueue) {
+            // QueueSheet の「+ 追加」から開く Search。選曲は再生せずキューに追加する。
+            SearchSheet(
+                isPresented: $showSearchForQueue,
+                viewModel: searchViewModel,
+                partnerName: roomViewModel.mode == .shared ? partnerName : nil,
+                onSelectTrack: { track in
+                    Task { await roomViewModel.addToQueue(track) }
+                    showToast("キューに追加しました · Added to queue")
+                }
+            )
+        }
         .sheet(isPresented: $showSearch) {
             @Bindable var bindableVM = searchViewModel
             SearchSheet(
@@ -214,8 +241,25 @@ struct RoomView: View {
 
             Spacer()
 
-            FrostedCircleButton(icon: "square.and.arrow.up", size: 38) {
-                showToast("招待リンクをシェア · Share invite")
+            // Queue button with unplayed-count badge
+            ZStack(alignment: .topTrailing) {
+                FrostedCircleButton(icon: "list.bullet", size: 38) {
+                    showQueue = true
+                }
+                let count = roomViewModel.queue.items.count
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 14, minHeight: 14)
+                        .background(
+                            Capsule()
+                                .fill(Color.pairtunePrimary)
+                                .overlay(Capsule().stroke(Color.pairtuneBase, lineWidth: 1.5))
+                        )
+                        .offset(x: 4, y: -4)
+                }
             }
         }
         .padding(.horizontal, 16)
