@@ -84,6 +84,10 @@ final class RoomViewModel: Identifiable {
     private let roomService = RoomService()
     private let historyService = HistoryService()
 
+    /// 再生キュー(§2.15)。Solo は in-memory、Shared は room_queue + Realtime。
+    /// init 時はまだ myUserId が決まっていないので、enterRoom で再構築する。
+    private(set) var queue: QueueViewModel
+
     // MARK: - Internal
 
     private(set) var activeSongId: String = ""
@@ -128,6 +132,7 @@ final class RoomViewModel: Identifiable {
         self.currentRoom = adapterRoom
         self.isHost = true
         self.mode = .solo
+        self.queue = QueueViewModel(mode: .solo, roomId: nil, myUserId: "")
     }
 
     // MARK: - Init (Shared モード — M5)
@@ -150,6 +155,7 @@ final class RoomViewModel: Identifiable {
         self.isHost = true   // M5: 両者ホスト
         self.mode = .shared
         self.sharedPairId = pairId
+        self.queue = QueueViewModel(mode: .shared, roomId: sharedRoomV4.id, myUserId: "")
     }
 
     // MARK: - Init (旧 Shared モード — v0.2 互換、M5 以降は上の init を使う)
@@ -158,6 +164,7 @@ final class RoomViewModel: Identifiable {
         self.currentRoom = room
         self.isHost = isHost
         self.mode = .shared
+        self.queue = QueueViewModel(mode: .shared, roomId: room.id, myUserId: "")
     }
 
     // MARK: - Lifecycle
@@ -168,12 +175,16 @@ final class RoomViewModel: Identifiable {
         // Solo モード: Realtime 接続は不要、userId だけ保持して終わり
         if mode == .solo {
             myUserId = userId
+            queue = QueueViewModel(mode: .solo, roomId: nil, myUserId: userId)
+            await queue.start()
             await playPendingInitialTrackIfNeeded()
             return
         }
 
         // Shared モード (M5): 両者とも broadcast + listen
         myUserId = userId
+        queue = QueueViewModel(mode: .shared, roomId: currentRoom.id, myUserId: userId)
+        await queue.start()
         startConnectionObserver()
 
         await channelManager.connect(
@@ -245,6 +256,26 @@ final class RoomViewModel: Identifiable {
     }
 
     // MARK: - Host actions
+
+    /// 検索結果やコンテキストメニューから「キューに追加」する。
+    func addToQueue(_ track: Track) async {
+        await queue.enqueue(track)
+    }
+
+    /// QueueSheet で曲をタップ → その曲にスキップ。キューからは消す。
+    func playFromQueue(_ item: QueueItem) async {
+        await queue.remove(itemId: item.id)
+        await playAsHost(item.toTrack())
+    }
+
+    /// 「次に再生」(現再生の直後にキュー挿入)。
+    func playNextInQueue(_ track: Track) async {
+        // Solo は items.position の最後、Shared は最後の position を使うのが基本だが
+        // 「現再生の直後」は items[0] の前(= position 0)に入れたい。MVP では
+        // items の先頭(items[0])の position - 1 か 0 にする。
+        let after = (queue.items.first?.position ?? 0) - 1
+        await queue.playNext(track, afterPosition: after)
+    }
 
     /// カタログ曲を直接お気に入りに追加する(再生はしない)。
     /// Search / Artist / Album の TrackContextMenu「お気に入りに追加」から呼ぶ。
