@@ -73,6 +73,11 @@ final class SearchViewModel {
         Task { await roomViewModel.playAsHost(track) }
     }
 
+    /// Search 経由のお気に入り追加。RoomViewModel.addFavoriteToCatalog に委譲。
+    func addFavorite(_ track: Track) async {
+        await roomViewModel.addFavoriteToCatalog(track)
+    }
+
     private func search(_ query: String) async {
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             isSearching = false

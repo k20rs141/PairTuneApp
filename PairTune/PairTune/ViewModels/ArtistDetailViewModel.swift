@@ -49,6 +49,11 @@ final class ArtistDetailViewModel {
         Task { await roomViewModel.playAsHost(track) }
     }
 
+    /// TrackContextMenu「お気に入りに追加」から呼ぶ。RoomViewModel に委譲。
+    func addFavorite(_ track: Track) async {
+        await roomViewModel.addFavoriteToCatalog(track)
+    }
+
     /// Send-to-partner CTA。MVP では「トップソング先頭曲を再生する」=「相手に届ける」。
     /// playAsHost が shared モードでは relay/broadcast を行うため、相手の RoomView にも届く。
     func sendTopSongToPartner() {

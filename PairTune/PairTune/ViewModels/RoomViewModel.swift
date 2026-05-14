@@ -246,6 +246,23 @@ final class RoomViewModel: Identifiable {
 
     // MARK: - Host actions
 
+    /// カタログ曲を直接お気に入りに追加する(再生はしない)。
+    /// Search / Artist / Album の TrackContextMenu「お気に入りに追加」から呼ぶ。
+    /// my_room_play_history に is_favorited=TRUE / played_duration_seconds=0 の
+    /// マーカー行を INSERT する(冪等)。enterRoom 前で myUserId が未設定の場合は
+    /// auth.session から userId を引いてフォールバックする。
+    func addFavoriteToCatalog(_ track: Track) async {
+        let userId: String
+        if !myUserId.isEmpty {
+            userId = myUserId
+        } else if let uid = try? await SupabaseManager.shared.client.auth.session.user.id.uuidString {
+            userId = uid
+        } else {
+            return
+        }
+        _ = await historyService.addFavoriteFromCatalog(track, userId: userId)
+    }
+
     /// SearchSheet から曲が選ばれた時に呼ばれる(Solo / Shared 共通)
     func playAsHost(_ track: Track) async {
         // Apple Music 契約確認(未契約ならアラートで設定誘導)

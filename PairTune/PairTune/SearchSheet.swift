@@ -22,6 +22,9 @@ struct SearchSheet: View {
                         track: track,
                         partnerName: partnerName,
                         onClose: { contextTrack = nil },
+                        onFavorite: {
+                            Task { await viewModel.addFavorite(track) }
+                        },
                         onSendToPartner: {
                             isPresented = false
                             viewModel.selectSong(track)

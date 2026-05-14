@@ -49,6 +49,9 @@ struct ArtistDetailView: View {
                     track: track,
                     partnerName: partnerName,
                     onClose: { contextTrack = nil },
+                    onFavorite: {
+                        Task { await viewModel.addFavorite(track) }
+                    },
                     onSendToPartner: { viewModel.selectSong(track) },
                     onPlayNext: { viewModel.selectSong(track) },
                     onShowAlbum: (onSelectAlbum != nil && track.albumId != nil) ? {

@@ -60,6 +60,11 @@ final class AlbumDetailViewModel {
         Task { await roomViewModel.playAsHost(track) }
     }
 
+    /// TrackContextMenu「お気に入りに追加」から呼ぶ。RoomViewModel に委譲。
+    func addFavorite(_ track: Track) async {
+        await roomViewModel.addFavoriteToCatalog(track)
+    }
+
     // MARK: - Apple Music API
 
     private struct AlbumDetail {

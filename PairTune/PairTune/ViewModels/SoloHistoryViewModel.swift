@@ -104,10 +104,13 @@ final class SoloHistoryViewModel {
 
     private func loadMyRecent(userId: String) async {
         do {
+            // played_duration_seconds < 30 の行は Search からの「♥ 専用マーカー」なので除外。
+            // 実プレイは recordSoloPlay の guard で必ず >=30s で INSERT される。
             myRecent = try await client
                 .from("my_room_play_history")
                 .select()
                 .eq("user_id", value: userId)
+                .gte("played_duration_seconds", value: 30)
                 .order("played_at", ascending: false)
                 .limit(10)
                 .execute()
