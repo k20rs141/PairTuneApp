@@ -152,6 +152,7 @@ struct RoomView: View {
         .sheet(isPresented: $showQueue) {
             QueueSheet(
                 roomViewModel: roomViewModel,
+                recentlyPlayed: roomViewModel.sessionRecentlyPlayed,
                 partnerName: roomViewModel.mode == .shared ? partnerName : nil,
                 onAddTap: {
                     showQueue = false
@@ -241,24 +242,30 @@ struct RoomView: View {
 
             Spacer()
 
-            // Queue button with unplayed-count badge
-            ZStack(alignment: .topTrailing) {
-                FrostedCircleButton(icon: "list.bullet", size: 38) {
-                    showQueue = true
+            HStack(spacing: 8) {
+                // キューボタン: 右端の share の隣に配置。未再生数のドットを overlay。
+                ZStack(alignment: .topTrailing) {
+                    FrostedCircleButton(icon: "text.line.first.and.arrowtriangle.forward", size: 38) {
+                        showQueue = true
+                    }
+                    let count = roomViewModel.queue.items.count
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 5)
+                            .frame(minWidth: 14, minHeight: 14)
+                            .background(
+                                Capsule()
+                                    .fill(Color.pairtunePrimary)
+                                    .overlay(Capsule().stroke(Color.pairtuneBase, lineWidth: 1.5))
+                            )
+                            .offset(x: 4, y: -4)
+                    }
                 }
-                let count = roomViewModel.queue.items.count
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 5)
-                        .frame(minWidth: 14, minHeight: 14)
-                        .background(
-                            Capsule()
-                                .fill(Color.pairtunePrimary)
-                                .overlay(Capsule().stroke(Color.pairtuneBase, lineWidth: 1.5))
-                        )
-                        .offset(x: 4, y: -4)
+
+                FrostedCircleButton(icon: "square.and.arrow.up", size: 38) {
+                    showToast("招待リンクをシェア · Share invite")
                 }
             }
         }

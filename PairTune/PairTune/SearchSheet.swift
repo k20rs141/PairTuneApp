@@ -34,8 +34,8 @@ struct SearchSheet: View {
                             viewModel.selectSong(track)
                         },
                         onPlayNext: {
-                            isPresented = false
-                            viewModel.selectSong(track)
+                            // 「次に再生」は再生せずに現再生の直後にキュー挿入する。
+                            Task { await viewModel.playNext(track) }
                         },
                         onShowAlbum: track.albumId.map { albumId in
                             {
@@ -67,7 +67,12 @@ struct SearchSheet: View {
                     partnerName: partnerName,
                     onSelectTrack: { track in
                         isPresented = false
-                        viewModel.selectSong(track)
+                        // onSelectTrack override が設定されていればそちら(enqueue)を優先。
+                        if let onSelectTrack {
+                            onSelectTrack(track)
+                        } else {
+                            viewModel.selectSong(track)
+                        }
                     },
                     onSelectAlbum: { album in
                         navPath.append(album)
@@ -83,7 +88,11 @@ struct SearchSheet: View {
                     partnerName: partnerName,
                     onSelectTrack: { track in
                         isPresented = false
-                        viewModel.selectSong(track)
+                        if let onSelectTrack {
+                            onSelectTrack(track)
+                        } else {
+                            viewModel.selectSong(track)
+                        }
                     },
                     onShowArtist: { artist in
                         navPath.append(artist)
@@ -243,7 +252,10 @@ struct SearchSheet: View {
                                 } label: {
                                     TrackRow(track: track)
                                 }
-                                .simultaneousGesture(
+                                // highPriorityGesture を使うと Button の tap が
+                                // 長押し成立時にキャンセルされ、両方が発火する問題
+                                // (simultaneousGesture)を回避できる。
+                                .highPriorityGesture(
                                     LongPressGesture(minimumDuration: 0.4).onEnded { _ in
                                         contextTrack = track
                                     }

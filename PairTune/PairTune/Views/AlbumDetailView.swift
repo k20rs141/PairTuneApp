@@ -73,7 +73,7 @@ struct AlbumDetailView: View {
                         Task { await viewModel.addFavorite(track) }
                     },
                     onSendToPartner: { viewModel.play(track) },
-                    onPlayNext: { viewModel.play(track) },
+                    onPlayNext: { Task { await viewModel.playNext(track) } },
                     onShowArtist: (onShowArtist != nil && track.artistId != nil) ? {
                         onShowArtist?(Artist(
                             id: track.artistId!,

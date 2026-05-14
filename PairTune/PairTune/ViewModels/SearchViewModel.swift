@@ -78,6 +78,11 @@ final class SearchViewModel {
         await roomViewModel.addFavoriteToCatalog(track)
     }
 
+    /// TrackContextMenu「次に再生」から呼ぶ。現再生の直後にキュー挿入する。
+    func playNext(_ track: Track) async {
+        await roomViewModel.playNextInQueue(track)
+    }
+
     private func search(_ query: String) async {
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             isSearching = false

@@ -153,30 +153,41 @@ struct QueueSheet: View {
     private var nowPlayingSection: some View {
         sectionHeader(icon: "waveform", title: "再生中", sub: "NOW PLAYING", accent: .pairtuneSecondary)
         if let track = roomViewModel.currentTrack {
-            HStack(spacing: 12) {
-                artworkView(url: track.artworkURL?.absoluteString, size: 48, accent: .pairtuneSecondary, stops: track.gradientStops)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(track.title)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        playingChip
-                    }
+            HStack(spacing: 14) {
+                artworkView(
+                    url: track.artworkURL?.absoluteString,
+                    size: 64,
+                    accent: .pairtuneSecondary,
+                    stops: track.gradientStops
+                )
+                .shadow(color: Color.pairtuneSecondary.opacity(0.27), radius: 14, y: 6)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    playingChip
+                    Text(track.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                     Text(track.artist)
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 12))
                         .foregroundColor(Color(hex: "A8A8A8"))
                         .lineLimit(1)
                 }
                 Spacer()
             }
-            .padding(12)
+            .padding(14)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.04))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.pairtuneSecondary.opacity(0.16), Color.pairtunePrimary.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.pairtuneSecondary.opacity(0.27), lineWidth: 0.5)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.pairtuneSecondary.opacity(0.30), lineWidth: 0.5)
                     )
             )
         } else {
@@ -248,63 +259,69 @@ struct QueueSheet: View {
     }
 
     private func queueRow(item: QueueItem, index: Int) -> some View {
-        HStack(spacing: 10) {
-            Text("\(index + 1)")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color(hex: "7A7588"))
-                .frame(width: 18)
-                .monospacedDigit()
-
-            artworkView(
-                url: item.artworkUrl,
-                size: 40,
-                accent: .pairtunePrimary,
-                stops: [
-                    .init(color: .pairtunePrimary, location: 0),
-                    .init(color: Color(hex: "4A1D3D"), location: 1),
-                ]
-            )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.songTitle)
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(item.artistName)
-                    .font(.system(size: 11))
-                    .foregroundColor(Color(hex: "7A7588"))
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-
-            if let dur = item.durationSeconds {
-                Text(fmt(dur))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex: "5A5566"))
-                    .monospacedDigit()
-            }
-
-            Button {
-                contextTrack = item.toTrack()
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color(hex: "5A5566"))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.025))
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
+        // 行タップで再生、⋯ ボタンタップで context menu を出す。
+        // 行全体を Button にすると ⋯ の Button タップが行 Button にも伝播して
+        // 両方発火するため、行は Button、⋯ はその内側に置く(SwiftUI は内側 Button
+        // のタップを優先的にハンドルし、外側 Button に伝播しない)。
+        Button {
             Task { await roomViewModel.playFromQueue(item) }
+        } label: {
+            HStack(spacing: 10) {
+                Text("\(index + 1)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Color(hex: "7A7588"))
+                    .frame(width: 18)
+                    .monospacedDigit()
+
+                artworkView(
+                    url: item.artworkUrl,
+                    size: 40,
+                    accent: .pairtunePrimary,
+                    stops: [
+                        .init(color: .pairtunePrimary, location: 0),
+                        .init(color: Color(hex: "4A1D3D"), location: 1),
+                    ]
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.songTitle)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Text(item.artistName)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "7A7588"))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+
+                if let dur = item.durationSeconds {
+                    Text(fmt(dur))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "5A5566"))
+                        .monospacedDigit()
+                }
+
+                Button {
+                    contextTrack = item.toTrack()
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(hex: "5A5566"))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(0.025))
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Recently played

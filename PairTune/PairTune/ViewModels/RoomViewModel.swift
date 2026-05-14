@@ -88,6 +88,14 @@ final class RoomViewModel: Identifiable {
     /// init 時はまだ myUserId が決まっていないので、enterRoom で再構築する。
     private(set) var queue: QueueViewModel
 
+    /// このセッション内で再生し終えた曲(QueueSheet の Recently played 表示用)。
+    /// 新しい順に最大 8 件まで保持。RoomViewModel が破棄されたらクリア。
+    private(set) var sessionRecentlyPlayed: [PlayHistoryEntry] = []
+
+    /// キュー自動進行用: 「この曲では既に次の曲へ進めた」事実を保持して二重発火を防ぐ。
+    private var advancedForSongId: String = ""
+    private var queueAdvanceTask: Task<Void, Never>?
+
     // MARK: - Internal
 
     private(set) var activeSongId: String = ""
@@ -177,6 +185,7 @@ final class RoomViewModel: Identifiable {
             myUserId = userId
             queue = QueueViewModel(mode: .solo, roomId: nil, myUserId: userId)
             await queue.start()
+            startQueueAutoAdvance()
             await playPendingInitialTrackIfNeeded()
             return
         }
@@ -185,6 +194,7 @@ final class RoomViewModel: Identifiable {
         myUserId = userId
         queue = QueueViewModel(mode: .shared, roomId: currentRoom.id, myUserId: userId)
         await queue.start()
+        startQueueAutoAdvance()
         startConnectionObserver()
 
         await channelManager.connect(
@@ -257,6 +267,55 @@ final class RoomViewModel: Identifiable {
 
     // MARK: - Host actions
 
+    /// 曲が終わったらキュー先頭を自動再生する。enterRoom 完了時に開始。
+    /// musicService.currentPlaybackTime を 1 秒間隔で監視し、duration-1 を超えたら
+    /// queue.popFirst() で 1 件取り出して playAsHost に流す。
+    private func startQueueAutoAdvance() {
+        queueAdvanceTask?.cancel()
+        queueAdvanceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                await self.advanceQueueIfNeeded()
+            }
+        }
+    }
+
+    @MainActor
+    private func advanceQueueIfNeeded() async {
+        guard let track = currentTrack, track.duration > 0 else { return }
+        guard syncState == .playing, !isPaused else { return }
+        let pos = Int(musicService.currentPlaybackTime)
+        if pos >= track.duration - 1 && advancedForSongId != track.id {
+            advancedForSongId = track.id
+            if let next = await queue.popFirst() {
+                await playAsHost(next.toTrack())
+            }
+        }
+    }
+
+    /// `currentTrack` が別の曲に切り替わる時、いま再生中だった曲を
+    /// sessionRecentlyPlayed の先頭に push する(重複曲は更新)。
+    private func pushRecentlyPlayedIfChanged(newTrackId: String) {
+        guard let current = currentTrack, current.id != newTrackId else { return }
+        let entry = PlayHistoryEntry(
+            id: UUID().uuidString,
+            songId: current.id,
+            songTitle: current.title,
+            artistName: current.artist,
+            albumTitle: current.album.isEmpty ? nil : current.album,
+            artworkUrl: current.artworkURL?.absoluteString,
+            playedAt: Date(),
+            playedDurationSeconds: musicService.currentPlaybackTime > 0 ? Int(musicService.currentPlaybackTime) : 0
+        )
+        // 既存の同曲を取り除いてから先頭に挿入(MRU 動作)。最大 8 件保持。
+        sessionRecentlyPlayed.removeAll { $0.songId == current.id }
+        sessionRecentlyPlayed.insert(entry, at: 0)
+        if sessionRecentlyPlayed.count > 8 {
+            sessionRecentlyPlayed = Array(sessionRecentlyPlayed.prefix(8))
+        }
+    }
+
     /// 検索結果やコンテキストメニューから「キューに追加」する。
     func addToQueue(_ track: Track) async {
         await queue.enqueue(track)
@@ -304,6 +363,8 @@ final class RoomViewModel: Identifiable {
         }
 
         syncState = .loading
+        // 前の曲を Recently played に push してから差し替える(QueueSheet 表示用)。
+        pushRecentlyPlayedIfChanged(newTrackId: track.id)
         currentTrack = track
         isPaused = false
 

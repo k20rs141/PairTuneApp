@@ -65,6 +65,11 @@ final class AlbumDetailViewModel {
         await roomViewModel.addFavoriteToCatalog(track)
     }
 
+    /// TrackContextMenu「次に再生」から呼ぶ。現再生の直後にキュー挿入する。
+    func playNext(_ track: Track) async {
+        await roomViewModel.playNextInQueue(track)
+    }
+
     // MARK: - Apple Music API
 
     private struct AlbumDetail {

@@ -289,7 +289,8 @@ struct SoloModeView: View {
                             TrackCarouselCard(entry: entry, accent: .pairtunePrimary)
                         }
                         .buttonStyle(.plain)
-                        .simultaneousGesture(
+                        // highPriorityGesture で長押し成立時 Button の tap を抑制。
+                        .highPriorityGesture(
                             LongPressGesture(minimumDuration: 0.4).onEnded { _ in
                                 contextEntry = entry
                             }
@@ -364,7 +365,7 @@ struct SoloModeView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .simultaneousGesture(
+                    .highPriorityGesture(
                         LongPressGesture(minimumDuration: 0.4).onEnded { _ in
                             contextEntry = entry
                         }

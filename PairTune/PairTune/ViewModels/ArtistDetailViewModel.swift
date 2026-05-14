@@ -54,6 +54,11 @@ final class ArtistDetailViewModel {
         await roomViewModel.addFavoriteToCatalog(track)
     }
 
+    /// TrackContextMenu「次に再生」から呼ぶ。現再生の直後にキュー挿入する。
+    func playNext(_ track: Track) async {
+        await roomViewModel.playNextInQueue(track)
+    }
+
     /// Send-to-partner CTA。MVP では「トップソング先頭曲を再生する」=「相手に届ける」。
     /// playAsHost が shared モードでは relay/broadcast を行うため、相手の RoomView にも届く。
     func sendTopSongToPartner() {
