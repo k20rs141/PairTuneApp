@@ -62,6 +62,15 @@ final class PairService {
         enum CodingKeys: String, CodingKey { case pTargetCode = "p_target_code" }
     }
 
+    private struct UpdatePreserveParams: Encodable {
+        let pPairId: String
+        let pPreserve: Bool
+        enum CodingKeys: String, CodingKey {
+            case pPairId   = "p_pair_id"
+            case pPreserve = "p_preserve"
+        }
+    }
+
     private struct RejectUpdate: Encodable {
         let status: String
         let respondedAt: String
@@ -172,6 +181,38 @@ final class PairService {
         } catch {
             throw PairError.unknown(error)
         }
+    }
+
+    /// 解消済み(status='ended')pair に対して preserve_memories を変更する。
+    /// migration 0007 で追加した `update_preserve_memories(p_pair_id, p_preserve)` RPC を呼ぶ。
+    /// - true  : scheduled_deletion_at を NULL にして永続保持
+    /// - false : 既に値があれば維持、無ければ NOW()+90d を設定して 90 日後削除
+    func updatePreserveMemories(pairId: String, preserve: Bool) async throws {
+        do {
+            try await client
+                .rpc("update_preserve_memories", params: UpdatePreserveParams(
+                    pPairId: pairId,
+                    pPreserve: preserve
+                ))
+                .execute()
+        } catch {
+            throw PairError.unknown(error)
+        }
+    }
+
+    /// 解消済みの自分の pair を最新順に取得。Profile > Memories トグルや
+    /// Solo memory モードの遷移先候補として使う。limit で件数を絞る。
+    func fetchEndedPairs(userId: String, limit: Int = 5) async throws -> [PairRelationship] {
+        let rows: [PairRelationship] = try await client
+            .from("pair_relationships")
+            .select()
+            .eq("status", value: "ended")
+            .or("user_a_id.eq.\(userId),user_b_id.eq.\(userId)")
+            .order("ended_at", ascending: false)
+            .limit(limit)
+            .execute()
+            .value
+        return rows
     }
 
     // MARK: - Fetch helpers

@@ -533,11 +533,29 @@ struct ProfileView: View {
     // MARK: - Memories group
 
     private var memoriesGroup: some View {
-        SettingsGroup(label: "思い出と履歴", sub: "Memories & data", icon: "music.note", accent: Color(hex: "7A7588")) {
+        // 解消済み pair があれば、その preserve_memories を直接 binding に反映する。
+        // ない場合は UnpairDialog の初期値として使う AppStorage のローカル prefer に向ける。
+        let hasEndedPair = pairViewModel.endedPairs.first != nil
+        let toggleBinding = Binding<Bool>(
+            get: {
+                pairViewModel.endedPairs.first?.preserveMemories ?? preferPreserveMemories
+            },
+            set: { newValue in
+                preferPreserveMemories = newValue
+                if hasEndedPair {
+                    Task {
+                        _ = await pairViewModel.updateLatestEndedPairPreserveMemories(newValue)
+                    }
+                }
+            }
+        )
+        return SettingsGroup(label: "思い出と履歴", sub: "Memories & data", icon: "music.note", accent: Color(hex: "7A7588")) {
             SettingsToggleRow(
                 title: "解消後も思い出を残す",
-                description: "ペアリングが終わっても、ふたりで聴いた曲を Solo に閲覧専用で残します。",
-                isOn: $preferPreserveMemories,
+                description: hasEndedPair
+                    ? "オフにすると 90 日後に過去の履歴が削除されます。"
+                    : "ペアリングが終わっても、ふたりで聴いた曲を Solo に閲覧専用で残します。",
+                isOn: toggleBinding,
                 accent: .pairtunePrimary
             )
         }

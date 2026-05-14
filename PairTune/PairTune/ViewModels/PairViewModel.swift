@@ -63,6 +63,15 @@ final class PairViewModel {
     /// パートナーのプロフィール(activePair が立った時に lazy load)
     var partnerProfile: ProfileV4?
 
+    /// 自分が当事者の ended pair(直近 5 件まで)。Profile > Memories トグルで
+    /// preserve_memories を後から変更する対象を解決するために保持する。
+    var endedPairs: [PairRelationship] = []
+    /// 直近 ended pair の preserve_memories(UI の表示・トグル初期値に使う)。
+    /// nil = ended pair が無い。
+    var latestEndedPreserveMemories: Bool? { endedPairs.first?.preserveMemories }
+    /// preserve_memories トグルの DB 反映中フラグ
+    var isUpdatingPreserveMemories: Bool = false
+
     // MARK: - Private
 
     private let pairService = PairService()
@@ -112,6 +121,7 @@ final class PairViewModel {
         sendState = .idle
         activePair = nil
         partnerProfile = nil
+        endedPairs = []
     }
 
     // MARK: - Refresh
@@ -120,6 +130,38 @@ final class PairViewModel {
         await refreshActivePair()
         await refreshPendingIncoming()
         await refreshOutgoing()
+        await refreshEndedPairs()
+    }
+
+    private func refreshEndedPairs() async {
+        guard let meId else { return }
+        do {
+            endedPairs = try await pairService.fetchEndedPairs(userId: meId)
+        } catch {
+            print("[PairViewModel] refreshEndedPairs error:", error)
+        }
+    }
+
+    /// 直近 ended pair の preserve_memories を切り替える。Profile > Memories トグルから呼ぶ。
+    /// 楽観更新 → RPC → 失敗時ロールバック。
+    func updateLatestEndedPairPreserveMemories(_ preserve: Bool) async -> Bool {
+        guard let target = endedPairs.first else { return false }
+        let previous = target.preserveMemories
+        // 楽観更新: ローカルの endedPairs[0] を書き換え
+        endedPairs[0].preserveMemories = preserve
+        endedPairs[0].scheduledDeletionAt = preserve ? nil : (target.scheduledDeletionAt ?? Date().addingTimeInterval(60 * 60 * 24 * 90))
+        isUpdatingPreserveMemories = true
+        defer { isUpdatingPreserveMemories = false }
+        do {
+            try await pairService.updatePreserveMemories(pairId: target.id, preserve: preserve)
+            return true
+        } catch {
+            print("[PairViewModel] updatePreserveMemories error:", error)
+            // rollback
+            endedPairs[0].preserveMemories = previous
+            endedPairs[0].scheduledDeletionAt = target.scheduledDeletionAt
+            return false
+        }
     }
 
     private func refreshActivePair() async {
@@ -276,6 +318,8 @@ final class PairViewModel {
             partnerProfile = nil
             outgoingRequest = nil
             sendState = .idle
+            // 解消した pair が endedPairs の先頭に来るように再取得
+            await refreshEndedPairs()
             return true
         } catch {
             print("[PairViewModel] endPair error:", error)
