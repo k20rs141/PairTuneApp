@@ -52,6 +52,18 @@ final class HistoryService {
         }
     }
 
+    /// 二重 INSERT チェック用の最小限の型。
+    /// `select("id,song_id")` で取れる列だけを持つ。`PlayHistoryEntry` は
+    /// non-optional な `song_title` などを持つため、ここで使うと decode が必ず失敗する。
+    private struct SharedPlayIDOnly: Decodable {
+        let id: String
+        let songId: String
+        enum CodingKeys: String, CodingKey {
+            case id
+            case songId = "song_id"
+        }
+    }
+
     // MARK: - Solo
 
     /// my_room_play_history に記録する。
@@ -60,7 +72,7 @@ final class HistoryService {
     func recordSoloPlay(_ track: Track, userId: String, duration: Int) async {
         guard duration >= 30 else { return }
         do {
-            let recent: [PlayHistoryEntry] = try await client
+            let recent: [SharedPlayIDOnly] = try await client
                 .from("my_room_play_history")
                 .select("id,song_id")
                 .eq("user_id", value: userId)
@@ -105,7 +117,7 @@ final class HistoryService {
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             let cutoff = iso.string(from: Date().addingTimeInterval(-60))
 
-            let recent: [PlayHistoryEntry] = try await client
+            let recent: [SharedPlayIDOnly] = try await client
                 .from("shared_room_play_history")
                 .select("id,song_id")
                 .eq("pair_id", value: pairId)
