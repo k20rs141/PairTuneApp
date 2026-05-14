@@ -3,9 +3,12 @@ import SwiftUI
 struct SearchSheet: View {
     @Binding var isPresented: Bool
     var viewModel: SearchViewModel
+    /// Shared モードで partner がいる時のみ「相手に送る」CTA / Action sheet を表示する。
+    var partnerName: String? = nil
 
     @State private var query: String = ""
-    @State private var navPath: [Artist] = []
+    @State private var navPath = NavigationPath()
+    @State private var contextTrack: Track?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -13,14 +16,70 @@ struct SearchSheet: View {
             ZStack {
                 Color.pairtuneSurface.ignoresSafeArea()
                 searchRoot
+
+                if let track = contextTrack {
+                    TrackContextMenu(
+                        track: track,
+                        partnerName: partnerName,
+                        onClose: { contextTrack = nil },
+                        onSendToPartner: {
+                            isPresented = false
+                            viewModel.selectSong(track)
+                        },
+                        onPlayNext: {
+                            isPresented = false
+                            viewModel.selectSong(track)
+                        },
+                        onShowAlbum: track.albumId.map { albumId in
+                            {
+                                navPath.append(Album(
+                                    id: albumId,
+                                    title: track.album,
+                                    artistName: track.artist,
+                                    artworkURL: track.artworkURL
+                                ))
+                            }
+                        },
+                        onShowArtist: track.artistId.map { artistId in
+                            {
+                                navPath.append(Artist(
+                                    id: artistId,
+                                    name: track.artist,
+                                    artworkURL: nil
+                                ))
+                            }
+                        }
+                    )
+                    .transition(.opacity)
+                }
             }
             .navigationBarHidden(true)
             .navigationDestination(for: Artist.self) { artist in
                 ArtistDetailView(
                     viewModel: ArtistDetailViewModel(artist: artist, roomViewModel: viewModel.roomViewModel),
+                    partnerName: partnerName,
                     onSelectTrack: { track in
                         isPresented = false
                         viewModel.selectSong(track)
+                    },
+                    onSelectAlbum: { album in
+                        navPath.append(album)
+                    },
+                    onSendArtistToPartner: partnerName != nil ? {
+                        isPresented = false
+                    } : nil
+                )
+            }
+            .navigationDestination(for: Album.self) { album in
+                AlbumDetailView(
+                    viewModel: AlbumDetailViewModel(album: album, roomViewModel: viewModel.roomViewModel),
+                    partnerName: partnerName,
+                    onSelectTrack: { track in
+                        isPresented = false
+                        viewModel.selectSong(track)
+                    },
+                    onShowArtist: { artist in
+                        navPath.append(artist)
                     }
                 )
             }
@@ -173,6 +232,11 @@ struct SearchSheet: View {
                                 } label: {
                                     TrackRow(track: track)
                                 }
+                                .simultaneousGesture(
+                                    LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                                        contextTrack = track
+                                    }
+                                )
                             }
                         }
                     }

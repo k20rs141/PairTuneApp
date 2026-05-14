@@ -60,6 +60,12 @@ struct Track: Identifiable, Equatable {
     let gradientStops: [Gradient.Stop]
     let dominant: Color
     var artworkURL: URL? = nil
+    /// Apple Music Album ID(`relationships.albums.data[].id`)。
+    /// TrackContextMenu「アルバムを見る」で AlbumDetailView へ push する時に使う。
+    var albumId: String? = nil
+    /// Apple Music Artist ID(`relationships.artists.data[].id`)。
+    /// TrackContextMenu「アーティストを見る」で ArtistDetailView へ push する時に使う。
+    var artistId: String? = nil
 
     static func == (lhs: Track, rhs: Track) -> Bool { lhs.id == rhs.id }
 }

@@ -79,7 +79,7 @@ final class SearchViewModel {
             return
         }
         let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
-        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/search?term=\(encoded)&types=songs,artists&limit=20&l=ja-JP") else {
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/search?term=\(encoded)&types=songs,artists&limit=20&l=ja-JP&include[songs]=albums,artists") else {
             isSearching = false
             return
         }
@@ -144,6 +144,7 @@ private struct AppleMusicSearchResponse: Decodable {
     struct SongResource: Decodable {
         let id: String
         let attributes: SongAttributes?
+        let relationships: SongRelationships?
 
         func toTrack() -> Track? {
             guard let attrs = attributes else { return nil }
@@ -164,9 +165,22 @@ private struct AppleMusicSearchResponse: Decodable {
                     .init(color: Color(hex: "4A1D3D"), location: 1.0),
                 ],
                 dominant: .pairtuneCoral,
-                artworkURL: artworkURL
+                artworkURL: artworkURL,
+                albumId: relationships?.albums?.data?.first?.id,
+                artistId: relationships?.artists?.data?.first?.id
             )
         }
+    }
+
+    struct SongRelationships: Decodable {
+        let albums: RelRef?
+        let artists: RelRef?
+    }
+    struct RelRef: Decodable {
+        let data: [RelID]?
+    }
+    struct RelID: Decodable {
+        let id: String
     }
 
     struct ArtistResource: Decodable {

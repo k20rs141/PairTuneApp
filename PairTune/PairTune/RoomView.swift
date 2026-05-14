@@ -149,7 +149,11 @@ struct RoomView: View {
         }
         .sheet(isPresented: $showSearch) {
             @Bindable var bindableVM = searchViewModel
-            SearchSheet(isPresented: $showSearch, viewModel: searchViewModel)
+            SearchSheet(
+                isPresented: $showSearch,
+                viewModel: searchViewModel,
+                partnerName: roomViewModel.mode == .shared ? partnerName : nil
+            )
                 .alert(
                     bindableVM.searchError ?? "",
                     isPresented: Binding(

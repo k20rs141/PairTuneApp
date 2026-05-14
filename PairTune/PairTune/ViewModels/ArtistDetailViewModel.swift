@@ -49,17 +49,27 @@ final class ArtistDetailViewModel {
         Task { await roomViewModel.playAsHost(track) }
     }
 
+    /// Send-to-partner CTA。MVP では「トップソング先頭曲を再生する」=「相手に届ける」。
+    /// playAsHost が shared モードでは relay/broadcast を行うため、相手の RoomView にも届く。
+    func sendTopSongToPartner() {
+        guard let first = topSongs.first else { return }
+        Task { await roomViewModel.playAsHost(first) }
+    }
+
+    /// "Latest release" カード用。albums の先頭を最新リリースとして扱う(API 既定で release date desc)。
+    var latestAlbum: Album? { albums.first }
+
     // MARK: - Apple Music API
 
     private static func fetchTopSongs(artistID: String) async throws -> [Track] {
         let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
-        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/view/top-songs?limit=20&l=ja-JP") else {
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/view/top-songs?limit=20&l=ja-JP&include=albums,artists") else {
             return []
         }
         let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
         try Task.checkCancellation()
         let decoded = try JSONDecoder().decode(TopSongsResponse.self, from: resp.data)
-        return decoded.data?.compactMap { $0.toTrack() } ?? []
+        return decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID) } ?? []
     }
 
     private static func fetchAlbums(artistID: String) async throws -> [Album] {
@@ -82,8 +92,9 @@ private struct TopSongsResponse: Decodable {
     struct SongResource: Decodable {
         let id: String
         let attributes: SongAttributes?
+        let relationships: SongRelationships?
 
-        func toTrack() -> Track? {
+        func toTrack(fallbackArtistID: String) -> Track? {
             guard let attrs = attributes else { return nil }
             let artworkURL = attrs.artwork.flatMap { art -> URL? in
                 let urlStr = art.url
@@ -102,7 +113,9 @@ private struct TopSongsResponse: Decodable {
                     .init(color: Color(hex: "4A1D3D"), location: 1.0),
                 ],
                 dominant: .pairtuneCoral,
-                artworkURL: artworkURL
+                artworkURL: artworkURL,
+                albumId: relationships?.albums?.data?.first?.id,
+                artistId: relationships?.artists?.data?.first?.id ?? fallbackArtistID
             )
         }
     }
@@ -113,6 +126,17 @@ private struct TopSongsResponse: Decodable {
         let albumName: String?
         let durationInMillis: Int?
         let artwork: ArtworkInfo?
+    }
+
+    struct SongRelationships: Decodable {
+        let albums: RelRef?
+        let artists: RelRef?
+    }
+    struct RelRef: Decodable {
+        let data: [RelID]?
+    }
+    struct RelID: Decodable {
+        let id: String
     }
 }
 
