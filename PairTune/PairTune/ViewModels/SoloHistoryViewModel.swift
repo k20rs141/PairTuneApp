@@ -13,6 +13,21 @@ final class SoloHistoryViewModel {
     private(set) var hasLoaded = false
 
     private let client = SupabaseManager.shared.client
+    private let historyService = HistoryService()
+
+    /// 「履歴から削除」アクションのハンドラ。my_room_play_history のエントリを
+    /// 楽観的に myRecent から取り除き、Supabase 側でも DELETE する。
+    /// 失敗した時はロールバックして UI を元に戻す。
+    func deleteMyRecent(_ entry: PlayHistoryEntry, userId: String) async {
+        let prevIndex = myRecent.firstIndex(where: { $0.id == entry.id })
+        if let i = prevIndex {
+            myRecent.remove(at: i)
+        }
+        let ok = await historyService.deleteSoloPlay(entryId: entry.id, userId: userId)
+        if !ok, let i = prevIndex {
+            myRecent.insert(entry, at: min(i, myRecent.count))
+        }
+    }
 
     /// pairId がある場合は shared_room 履歴も取得。常に自分の my_room 履歴を取得。
     func load(pairId: String?, userId: String) async {

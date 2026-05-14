@@ -46,6 +46,8 @@ struct SoloModeView: View {
         return viewModel.sharedHistory.isEmpty ? .empty : .full
     }
 
+    @State private var contextEntry: PlayHistoryEntry?
+
     var body: some View {
         ZStack {
             Color.pairtuneBase.ignoresSafeArea()
@@ -88,6 +90,23 @@ struct SoloModeView: View {
                     .padding(.top, 18)
                     .padding(.bottom, 56)
                 }
+            }
+
+            if let entry = contextEntry {
+                // shared_room_play_history のエントリ(pairId が立っている)は
+                // パートナーとの共有メモリなので「履歴から削除」は出さない(§8-5-2)。
+                let isMyRecent = entry.pairId == nil
+                TrackContextMenu(
+                    track: entry.toTrack(),
+                    partnerName: partnerName,
+                    onClose: { contextEntry = nil },
+                    onSendToPartner: { onPlayTrack(entry) },
+                    onPlayNext: { onPlayTrack(entry) },
+                    onRemoveFromHistory: isMyRecent ? {
+                        Task { await viewModel.deleteMyRecent(entry, userId: userId) }
+                    } : nil
+                )
+                .transition(.opacity)
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -248,6 +267,11 @@ struct SoloModeView: View {
                             TrackCarouselCard(entry: entry, accent: .pairtunePrimary)
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                                contextEntry = entry
+                            }
+                        )
                     }
                 }
                 .padding(.vertical, 2)
@@ -305,6 +329,11 @@ struct SoloModeView: View {
                         TrackListItem(entry: entry)
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                            contextEntry = entry
+                        }
+                    )
                 }
             }
         }

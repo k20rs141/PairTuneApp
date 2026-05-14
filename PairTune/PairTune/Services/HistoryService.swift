@@ -100,6 +100,26 @@ final class HistoryService {
         }
     }
 
+    // MARK: - Solo: delete
+
+    /// my_room_play_history から自分の 1 エントリを削除する。
+    /// RLS で user_id = auth.uid() の行のみ削除可能。
+    /// 戻り値は成功した時 true。失敗時は false。
+    func deleteSoloPlay(entryId: String, userId: String) async -> Bool {
+        do {
+            try await client
+                .from("my_room_play_history")
+                .delete()
+                .eq("id", value: entryId)
+                .eq("user_id", value: userId)
+                .execute()
+            return true
+        } catch {
+            print("[HistoryService] deleteSoloPlay error:", error)
+            return false
+        }
+    }
+
     // MARK: - Shared (M5 で使用)
 
     /// shared_room_play_history に記録する。
