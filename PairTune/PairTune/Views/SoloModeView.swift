@@ -32,6 +32,8 @@ struct SoloModeView: View {
     let partnerSharesFavorites: Bool
     let userId: String
     let pairId: String?
+    /// MemoryAlbumView へ push する際に使う(VM 生成に必要)。nil の時は「もっと見る」リンクが出ない。
+    var pair: PairRelationship? = nil
 
     var onExit: () -> Void
     /// 曲を再生してルームを開く。nil の場合は最後に聴いた曲(myRecent.first)を再生。
@@ -47,6 +49,7 @@ struct SoloModeView: View {
     }
 
     @State private var contextEntry: PlayHistoryEntry?
+    @State private var showMemoryAlbum: Bool = false
 
     var body: some View {
         ZStack {
@@ -113,6 +116,18 @@ struct SoloModeView: View {
         .onAppear {
             // RoomView から pop してきた時にも履歴を最新化する。
             Task { await viewModel.load(pairId: pairId, userId: userId) }
+        }
+        .navigationDestination(isPresented: $showMemoryAlbum) {
+            if let pair {
+                MemoryAlbumView(
+                    viewModel: MemoryAlbumViewModel(pair: pair, partnerName: partnerName),
+                    onPlay: { entry in
+                        // Memory Album から戻りつつ Solo の再生フローに流す。
+                        showMemoryAlbum = false
+                        onPlayTrack(entry)
+                    }
+                )
+            }
         }
     }
 
@@ -248,7 +263,8 @@ struct SoloModeView: View {
             title: "ふたりで聴いた曲",
             sub: "Together",
             accent: .pairtunePrimary,
-            actionLabel: state == .full ? "もっと見る" : nil
+            actionLabel: (state == .full && pair != nil) ? "もっと見る" : nil,
+            onAction: pair != nil ? { showMemoryAlbum = true } : nil
         )
 
         if state == .empty {
@@ -400,6 +416,7 @@ private struct SectionHeader: View {
     let sub: String
     let accent: Color
     var actionLabel: String? = nil
+    var onAction: (() -> Void)? = nil
     var chip: String? = nil
 
     var body: some View {
@@ -448,14 +465,19 @@ private struct SectionHeader: View {
             Spacer()
 
             if let actionLabel {
-                HStack(spacing: 3) {
-                    Text(actionLabel)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "7A7588"))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Color(hex: "7A7588"))
+                Button(action: { onAction?() }) {
+                    HStack(spacing: 3) {
+                        Text(actionLabel)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "7A7588"))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Color(hex: "7A7588"))
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(onAction == nil)
             }
         }
     }

@@ -167,6 +167,7 @@ struct ContentView: View {
                         partnerSharesFavorites: pairViewModel.partnerProfile?.shareFavorites ?? false,
                         userId: authViewModel.session?.user.id.uuidString ?? "",
                         pairId: pairViewModel.activePair?.id,
+                        pair: pairViewModel.activePair,
                         onExit: { showSoloMode = false },
                         onPlayTrack: { entry in
                             Task { await startSoloPlayback(entry: entry) }
