@@ -1,5 +1,6 @@
 import SwiftUI
 import Supabase
+import MusicKit
 
 struct ContentView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -15,13 +16,17 @@ struct ContentView: View {
     @State private var roomViewModel: RoomViewModel?
 
     // SoloModeView から検索モーダル経由で曲を選ぶフロー用
-    // - search ボタンタップ時に room + search VM を pre-create し SearchSheet を表示
+    // - search ボタンタップ時に room + search VM を pre-create
+    // - preparedSearchVM が非 nil の間だけ sheet が表示される(.sheet(item:))
     // - 曲選択 (playAsHost が走り activeSongId が立つ) → onDismiss で RoomView に遷移
     @State private var preparedSoloRoom: RoomViewModel?
     @State private var preparedSearchVM: SearchViewModel?
-    @State private var showSoloSearch: Bool = false
 
     @State private var pendingSendAlert: PairSendAlert?
+
+    /// バックグラウンド復帰時に pendingRequest を再取得するためのフック。
+    /// Realtime 購読がスリープ等で取りこぼした申請を必ず拾えるようにする。
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var auth = authViewModel
@@ -37,6 +42,13 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: authViewModel.session == nil)
+        .onChange(of: scenePhase) { _, newPhase in
+            // フォアグラウンド復帰時に申請の最新状態を取り直す。Realtime 購読が
+            // バックグラウンド中に切れていても、ここで pendingRequest が拾われて
+            // ホーム画面上で承認モーダルが立ち上がる。
+            guard newPhase == .active, authViewModel.session != nil else { return }
+            Task { await pairViewModel.refreshAll() }
+        }
         .onChange(of: authViewModel.session?.user.id) { _, newUserId in
             if let uid = newUserId {
                 Task { await pairViewModel.start(myUserId: uid.uuidString) }
@@ -186,10 +198,19 @@ struct ContentView: View {
                     )
                     // 検索モーダル: SoloModeView 直接表示。曲選択後 (activeSongId が立った状態で onDismiss)、
                     // pre-created RoomViewModel を表示用 state にコピーして RoomView を開く。
-                    .sheet(isPresented: $showSoloSearch, onDismiss: handleSoloSearchDismiss) {
-                        if let svm = preparedSearchVM {
-                            SearchSheet(isPresented: $showSoloSearch, viewModel: svm)
-                        }
+                    // `preparedSearchVM` を直接 item にして sheet を駆動する。
+                    // showSoloSearch / preparedSearchVM の二段 state が ズレて
+                    // 「シート表示中なのに VM nil」になる事故を回避するための統合。
+                    .sheet(item: $preparedSearchVM, onDismiss: handleSoloSearchDismiss) { svm in
+                        SearchSheet(
+                            isPresented: Binding(
+                                get: { preparedSearchVM != nil },
+                                set: { newValue in
+                                    if !newValue { preparedSearchVM = nil }
+                                }
+                            ),
+                            viewModel: svm
+                        )
                     }
                 }
                 // コード入力: Modal sheet（HIG — 独立した完結タスク）
@@ -293,13 +314,25 @@ struct ContentView: View {
     private func openSoloSearch() async {
         await homeViewModel.loadMyRoom()
         guard let myRoom = homeViewModel.myRoom else { return }
+
+        // 1. Apple Music の認可だけ先に await。これは権限ダイアログを出すだけで
+        //    ApplicationMusicPlayer の daemon 接続を伴わないため軽量。
+        //    検索 API(MusicDataRequest)はこの認可だけで使える。
+        _ = await MusicAuthorization.request()
+
+        // 2. VM 構築 → preparedSearchVM をセットすると `.sheet(item:)` が
+        //    自動でシートを開く。state が一致したまま表示されるので、
+        //    「シート表示中だが preparedSearchVM == nil」というずれが起きない。
         let vm = RoomViewModel(myRoom: myRoom)
-        // SearchSheet 内の playAsHost 用に enterRoom を済ませて musicService の権限を取得しておく
-        let userId = authViewModel.session?.user.id.uuidString ?? ""
-        await vm.enterRoom(userId: userId, displayName: nil)
+        let svm = SearchViewModel(roomViewModel: vm)
         preparedSoloRoom = vm
-        preparedSearchVM = SearchViewModel(roomViewModel: vm)
-        showSoloSearch = true
+        preparedSearchVM = svm
+
+        // 3. enterRoom(ApplicationMusicPlayer.shared の queue 接続を含む)はシミュレータ
+        //    等で `_establishConnectionIfNeeded timeout` を起こして数十秒ブロックする
+        //    ことがあるため、シート表示後にバックグラウンドで実行する。
+        let userId = authViewModel.session?.user.id.uuidString ?? ""
+        Task { await vm.enterRoom(userId: userId, displayName: nil) }
     }
 
     private func handleSoloSearchDismiss() {

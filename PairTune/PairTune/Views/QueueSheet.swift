@@ -71,6 +71,11 @@ struct QueueSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
+        .task {
+            // Realtime が遅延 / 切断していた場合の保険として、シートを開いた時点で
+            // 必ず一度キューを再取得する。Solo モードでは in-memory なので no-op。
+            await roomViewModel.queue.refresh()
+        }
     }
 
     // MARK: - Top

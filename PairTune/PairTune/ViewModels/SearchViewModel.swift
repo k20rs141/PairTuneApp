@@ -5,7 +5,10 @@ import Supabase
 
 @Observable
 @MainActor
-final class SearchViewModel {
+final class SearchViewModel: Identifiable {
+    /// `.sheet(item:)` 駆動用。インスタンスごとにユニーク。
+    nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+
     var songs: [Track] = []
     var artists: [Artist] = []
     var isSearching: Bool = false

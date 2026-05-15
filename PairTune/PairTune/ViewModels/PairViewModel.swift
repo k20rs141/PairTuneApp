@@ -122,6 +122,8 @@ final class PairViewModel {
         activePair = nil
         partnerProfile = nil
         endedPairs = []
+        // 「あとで」で抑制した申請 ID もリセット(stop() = サインアウト等のため)
+        deferredRequestIds = []
     }
 
     // MARK: - Refresh
@@ -277,36 +279,25 @@ final class PairViewModel {
         }
     }
 
-    /// 「あとで決める」: モーダルを閉じる + 該当 request.id を UserDefaults の
-    /// 「保留 ID 集合」に追加して以後の自動表示を抑制する(再起動・refresh しても出ない)。
-    /// 期限は DB 側の 24h 自動失効に委ねる。ユーザーが再度承認したくなった場合は
-    /// 設定や通知から手動で承認モーダルを呼び出す(将来課題)。
+    /// 「あとで決める」: モーダルを閉じる + 該当 request.id を「このセッション中だけ」
+    /// 抑制対象に追加する。アプリ再起動 / サインインし直すと in-memory state が
+    /// リセットされるので、まだ pending な申請があれば再度表示される。
+    /// 期限は DB 側の 24h 自動失効に委ねる。
     func dismissIncoming() {
         if let id = pendingRequest?.id {
-            addDeferredId(id)
+            deferredRequestIds.insert(id)
         }
         pendingRequest = nil
         pendingRequester = nil
     }
 
-    // MARK: - Deferred request persistence (UserDefaults)
+    // MARK: - Deferred request (in-memory only)
 
-    private static let deferredKey = "pt.deferredPairRequestIds"
+    /// 「あとで」で閉じた pending request の id 集合。session スコープ(再起動でリセット)。
+    private var deferredRequestIds: Set<String> = []
 
     private func loadDeferredIds() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: Self.deferredKey) ?? [])
-    }
-
-    private func addDeferredId(_ id: String) {
-        var s = loadDeferredIds()
-        s.insert(id)
-        UserDefaults.standard.set(Array(s), forKey: Self.deferredKey)
-    }
-
-    private func removeDeferredId(_ id: String) {
-        var s = loadDeferredIds()
-        s.remove(id)
-        UserDefaults.standard.set(Array(s), forKey: Self.deferredKey)
+        return deferredRequestIds
     }
 
     /// 解消: end_pair_relationship() RPC を呼ぶ。成功なら true。
@@ -408,6 +399,9 @@ final class PairViewModel {
 
         do {
             try await ch.subscribeWithError()
+            #if DEBUG
+            print("[PairViewModel] subscribed pair:\(myUserId)")
+            #endif
         } catch {
             print("[PairViewModel] subscribe error:", error)
             return
@@ -415,11 +409,17 @@ final class PairViewModel {
 
         listenTasks.append(Task { [weak self] in
             for await _ in reqInserts {
+                #if DEBUG
+                print("[PairViewModel] realtime: pair_requests INSERT received")
+                #endif
                 await self?.refreshPendingIncoming()
             }
         })
         listenTasks.append(Task { [weak self] in
             for await _ in reqUpdatesIn {
+                #if DEBUG
+                print("[PairViewModel] realtime: pair_requests UPDATE received (target=me)")
+                #endif
                 // A 側 cancel や cron expired を受け取ると pending では無くなるので
                 // fetchPendingIncomingRequest は nil を返し → 承認モーダルが閉じる
                 await self?.refreshPendingIncoming()

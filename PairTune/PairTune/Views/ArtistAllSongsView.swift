@@ -58,15 +58,26 @@ final class ArtistAllSongsViewModel {
         await roomViewModel.addFavoriteToCatalog(track)
     }
 
+    /// Apple Music の `/artists/{id}/songs` は limit 最大 20 のため、offset を進めて
+    /// 数回に分けて取得する(最大 6 ページ = 120 曲、または取得件数 < 20 で打ち切り)。
     private static func fetchAllSongs(artistID: String) async throws -> [Track] {
         let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
-        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/songs?limit=100&l=ja-JP&include=albums,artists") else {
-            return []
+        let pageSize = 20
+        let maxPages = 6
+        var collected: [Track] = []
+        for page in 0..<maxPages {
+            let offset = page * pageSize
+            guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/songs?limit=\(pageSize)&offset=\(offset)&l=ja-JP&include=albums,artists") else {
+                break
+            }
+            let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            try Task.checkCancellation()
+            let decoded = try JSONDecoder().decode(SongsResponse.self, from: resp.data)
+            let pageTracks = decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID) } ?? []
+            collected.append(contentsOf: pageTracks)
+            if pageTracks.count < pageSize { break }   // 末尾に達した
         }
-        let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
-        try Task.checkCancellation()
-        let decoded = try JSONDecoder().decode(SongsResponse.self, from: resp.data)
-        return decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID) } ?? []
+        return collected
     }
 }
 
