@@ -244,7 +244,18 @@ struct SearchSheet: View {
                                 }
                             },
                             onArtist: { artist in
-                                navPath.append(artist)
+                                // 「おすすめのアーティスト」は履歴由来で id が "history-..." の
+                                // ダミー。そのまま開くと ArtistDetail が Apple Music API で 404 に
+                                // なるので、タップ時に名前検索して実 ID を解決してから push する。
+                                if artist.id.hasPrefix("history-") {
+                                    Task {
+                                        if let resolved = await viewModel.resolveAppleMusicArtist(name: artist.name) {
+                                            navPath.append(resolved)
+                                        }
+                                    }
+                                } else {
+                                    navPath.append(artist)
+                                }
                             }
                         )
                     } else {

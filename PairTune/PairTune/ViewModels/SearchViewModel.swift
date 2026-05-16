@@ -207,6 +207,43 @@ final class SearchViewModel: Identifiable {
         await roomViewModel.playNextInQueue(track)
     }
 
+    /// 履歴由来の「おすすめのアーティスト」は id に `history-{name}` のダミー値を入れて
+    /// いるため、そのまま ArtistDetailView に渡すと Apple Music API が 404 を返す。
+    /// タップ時にこの関数で名前から実 artistID と artworkURL を解決し直す。
+    /// ヒットしなければ nil を返す(View 側で no-op)。
+    func resolveAppleMusicArtist(name: String) async -> Artist? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let storefront: String
+        if Self.containsJapanese(trimmed) {
+            storefront = "jp"
+        } else {
+            storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
+        }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.music.apple.com"
+        components.path = "/v1/catalog/\(storefront)/search"
+        components.queryItems = [
+            URLQueryItem(name: "term", value: trimmed),
+            URLQueryItem(name: "types", value: "artists"),
+            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "l", value: "ja-JP"),
+        ]
+        guard let url = components.url else { return nil }
+        do {
+            let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            let decoded = try JSONDecoder().decode(AppleMusicSearchResponse.self, from: resp.data)
+            guard var artist = decoded.results.artists?.data.first?.toArtist() else { return nil }
+            // 後段の ArtistDetail / ArtistAllSongs が同じ storefront で API を叩けるように埋める
+            artist.storefront = storefront
+            return artist
+        } catch {
+            print("[SearchViewModel] resolveAppleMusicArtist error:", error)
+            return nil
+        }
+    }
+
     /// 日本語の文字(ひらがな/カタカナ/CJK 漢字)が含まれているかを判定。
     /// ストアフロントを `jp` に強制するためのヒューリスティック。
     /// 端末ロケールが US の場合でも、日本語クエリでは jp カタログを検索したい。
