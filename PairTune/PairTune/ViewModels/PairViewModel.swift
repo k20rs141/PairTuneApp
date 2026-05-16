@@ -399,9 +399,6 @@ final class PairViewModel {
 
         do {
             try await ch.subscribeWithError()
-            #if DEBUG
-            print("[PairViewModel] subscribed pair:\(myUserId)")
-            #endif
         } catch {
             print("[PairViewModel] subscribe error:", error)
             return
@@ -409,17 +406,11 @@ final class PairViewModel {
 
         listenTasks.append(Task { [weak self] in
             for await _ in reqInserts {
-                #if DEBUG
-                print("[PairViewModel] realtime: pair_requests INSERT received")
-                #endif
                 await self?.refreshPendingIncoming()
             }
         })
         listenTasks.append(Task { [weak self] in
             for await _ in reqUpdatesIn {
-                #if DEBUG
-                print("[PairViewModel] realtime: pair_requests UPDATE received (target=me)")
-                #endif
                 // A 側 cancel や cron expired を受け取ると pending では無くなるので
                 // fetchPendingIncomingRequest は nil を返し → 承認モーダルが閉じる
                 await self?.refreshPendingIncoming()
