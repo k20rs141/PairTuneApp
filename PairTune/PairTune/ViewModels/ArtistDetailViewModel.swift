@@ -63,6 +63,20 @@ final class ArtistDetailViewModel {
         Task { await roomViewModel.playAsHost(track) }
     }
 
+    /// トラックタップ時、キューが空なら topSongs のタップした曲以降を up-next にまとめて追加する。
+    /// Apple Music ライクな挙動(タップした曲が再生されつつ、残りはキューに積まれる)。
+    func queueRemainingTopSongsIfEmpty(after track: Track) {
+        guard roomViewModel.queue.items.isEmpty else { return }
+        guard let idx = topSongs.firstIndex(where: { $0.id == track.id }) else { return }
+        let rest = Array(topSongs.dropFirst(idx + 1))
+        guard !rest.isEmpty else { return }
+        Task {
+            for t in rest {
+                await roomViewModel.addToQueue(t)
+            }
+        }
+    }
+
     /// TrackContextMenu「お気に入りに追加」から呼ぶ。RoomViewModel に委譲。
     func addFavorite(_ track: Track) async {
         await roomViewModel.addFavoriteToCatalog(track)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - AlbumDetailView (v0.4 §2.8)
 //
@@ -19,6 +20,7 @@ struct AlbumDetailView: View {
     var onShowArtist: ((Artist) -> Void)? = nil
 
     @State private var contextTrack: Track?
+    @State private var toastMessage: String?
 
     var body: some View {
         ZStack {
@@ -62,6 +64,18 @@ struct AlbumDetailView: View {
                 }
             }
             .scrollIndicators(.hidden)
+
+            // Toast overlay
+            if let msg = toastMessage {
+                VStack {
+                    Spacer()
+                    ToastView(message: msg)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .padding(.bottom, 130)
+                }
+                .animation(.easeOut(duration: 0.25), value: toastMessage != nil)
+                .allowsHitTesting(false)
+            }
 
             // TrackContextMenu overlay
             if let track = contextTrack {
@@ -231,8 +245,11 @@ struct AlbumDetailView: View {
             }
             .buttonStyle(.plain)
 
-            Button { } label: {
-                Image(systemName: "plus")
+            Button {
+                viewModel.playNextAll()
+                showToast("キューに追加しました")
+            } label: {
+                Image(systemName: "text.line.first.and.arrowtriangle.forward")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color(hex: "A8A8A8"))
                     .frame(width: 46, height: 46)
@@ -246,6 +263,18 @@ struct AlbumDetailView: View {
                     )
             }
             .buttonStyle(.plain)
+            .disabled(viewModel.tracks.isEmpty)
+        }
+    }
+
+    /// haptic 付きトースト表示。playNextAll など「キューへの追加」操作の確認に使う。
+    /// 1.6 秒後に自動で消える。
+    private func showToast(_ msg: String) {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        withAnimation { toastMessage = msg }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation { toastMessage = nil }
         }
     }
 
@@ -261,6 +290,8 @@ struct AlbumDetailView: View {
         LazyVStack(spacing: 0) {
             ForEach(Array(viewModel.tracks.enumerated()), id: \.element.id) { idx, track in
                 Button {
+                    // キューが空ならタップした曲以降を up-next に積む(Apple Music ライク)
+                    viewModel.queueRemainingIfEmpty(after: track)
                     onSelectTrack(track)
                 } label: {
                     AlbumTrackRow(

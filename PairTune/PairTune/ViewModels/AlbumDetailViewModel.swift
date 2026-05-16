@@ -82,6 +82,34 @@ final class AlbumDetailViewModel {
         }
     }
 
+    /// 「次に再生」CTA(text.line.first.and.arrowtriangle.forward)から呼ぶ。
+    /// アルバム/プレイリストの全曲を up-next 先頭に、トラック順を保ったまま挿入する。
+    /// 再生はしない。
+    func playNextAll() {
+        guard !tracks.isEmpty else { return }
+        Task {
+            // playNextInQueue は常に「現先頭の前」に挿入するため、逆順で呼ぶと
+            // 最終的にトラック順が保たれる。
+            for track in tracks.reversed() {
+                await roomViewModel.playNextInQueue(track)
+            }
+        }
+    }
+
+    /// トラックタップ時、キューが空ならタップした曲以降を up-next にまとめて追加する。
+    /// Apple Music ライクな挙動(タップした曲が再生されつつ、残りはキューに積まれる)。
+    func queueRemainingIfEmpty(after track: Track) {
+        guard roomViewModel.queue.items.isEmpty else { return }
+        guard let idx = tracks.firstIndex(where: { $0.id == track.id }) else { return }
+        let rest = Array(tracks.dropFirst(idx + 1))
+        guard !rest.isEmpty else { return }
+        Task {
+            for t in rest {
+                await roomViewModel.addToQueue(t)
+            }
+        }
+    }
+
     func play(_ track: Track) {
         Task { await roomViewModel.playAsHost(track) }
     }

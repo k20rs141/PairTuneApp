@@ -105,6 +105,8 @@ struct ArtistDetailView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(Array(viewModel.topSongs.enumerated()), id: \.element.id) { idx, track in
                                 Button {
+                                    // キューが空ならタップした曲以降を up-next に積む(Apple Music ライク)
+                                    viewModel.queueRemainingTopSongsIfEmpty(after: track)
                                     onSelectTrack(track)
                                 } label: {
                                     ArtistTrackRow(
