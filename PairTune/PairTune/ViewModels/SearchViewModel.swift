@@ -261,7 +261,14 @@ final class SearchViewModel: Identifiable {
             try Task.checkCancellation()
             let decoded = try JSONDecoder().decode(AppleMusicSearchResponse.self, from: dataResponse.data)
             songs = decoded.results.songs?.data.compactMap { $0.toTrack() } ?? []
-            artists = decoded.results.artists?.data.compactMap { $0.toArtist() } ?? []
+            // Artist には検索に使った storefront を埋め込む。後段の ArtistDetail /
+            // ArtistAllSongs が同じ storefront に対して /artists/{id}/... を叩けるように
+            // する(別ストアフロントで artistID が無効になり 500/404 になる事象を回避)。
+            artists = decoded.results.artists?.data.compactMap { resource in
+                var a = resource.toArtist()
+                a?.storefront = storefront
+                return a
+            } ?? []
             searchError = nil
             // 履歴には保存しない。確定(TextField .onSubmit)時のみ submitSearch() で追加する。
         } catch is CancellationError {

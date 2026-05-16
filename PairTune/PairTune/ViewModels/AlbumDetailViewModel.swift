@@ -29,9 +29,9 @@ final class AlbumDetailViewModel {
         isLoading = true
         loadError = nil
         loadTask?.cancel()
-        loadTask = Task { [albumID = album.id] in
+        loadTask = Task { [albumID = album.id, storefront = album.storefront] in
             do {
-                let detail = try await Self.fetchAlbumDetail(albumID: albumID)
+                let detail = try await Self.fetchAlbumDetail(albumID: albumID, storefront: storefront)
                 guard !Task.isCancelled else { return }
                 self.tracks = detail.tracks
                 self.totalDurationSeconds = detail.tracks.reduce(0) { $0 + $1.duration }
@@ -87,8 +87,10 @@ final class AlbumDetailViewModel {
         let albumArtistId: String?
     }
 
-    private static func fetchAlbumDetail(albumID: String) async throws -> AlbumDetail {
-        let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
+    private static func fetchAlbumDetail(albumID: String, storefront explicit: String?) async throws -> AlbumDetail {
+        // album.storefront を優先(検索 → Artist → Album 経由なら検索時の storefront、
+        // それ以外は端末ロケール)。クロスストアフロントで 404 / 500 になる事象を回避。
+        let storefront = explicit ?? Locale.current.region?.identifier.lowercased() ?? "jp"
         guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/albums/\(albumID)?l=ja-JP&include=artists,tracks") else {
             return AlbumDetail(tracks: [], releaseDate: nil, isSingle: false, isEP: false, albumArtistId: nil)
         }

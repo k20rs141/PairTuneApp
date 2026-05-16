@@ -24,9 +24,9 @@ final class ArtistDetailViewModel {
         isLoading = true
         loadError = nil
         loadTask?.cancel()
-        loadTask = Task { [artistID = artist.id] in
-            async let songsResult: [Track] = Self.fetchTopSongs(artistID: artistID)
-            async let albumsResult: [Album] = Self.fetchAlbums(artistID: artistID)
+        loadTask = Task { [artistID = artist.id, storefront = artist.storefront] in
+            async let songsResult: [Track] = Self.fetchTopSongs(artistID: artistID, storefront: storefront)
+            async let albumsResult: [Album] = Self.fetchAlbums(artistID: artistID, storefront: storefront)
             do {
                 let (songs, albums) = try await (songsResult, albumsResult)
                 guard !Task.isCancelled else { return }
@@ -71,26 +71,31 @@ final class ArtistDetailViewModel {
 
     // MARK: - Apple Music API
 
-    private static func fetchTopSongs(artistID: String) async throws -> [Track] {
-        let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
+    /// 検索由来の artist.storefront を優先し、未設定なら端末ロケールにフォールバック。
+    private static func resolveStorefront(_ explicit: String?) -> String {
+        explicit ?? Locale.current.region?.identifier.lowercased() ?? "jp"
+    }
+
+    private static func fetchTopSongs(artistID: String, storefront explicit: String?) async throws -> [Track] {
+        let storefront = resolveStorefront(explicit)
         guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/view/top-songs?limit=20&l=ja-JP&include=albums,artists") else {
             return []
         }
         let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
         try Task.checkCancellation()
         let decoded = try JSONDecoder().decode(TopSongsResponse.self, from: resp.data)
-        return decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID) } ?? []
+        return decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID, storefront: storefront) } ?? []
     }
 
-    private static func fetchAlbums(artistID: String) async throws -> [Album] {
-        let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
+    private static func fetchAlbums(artistID: String, storefront explicit: String?) async throws -> [Album] {
+        let storefront = resolveStorefront(explicit)
         guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/albums?limit=20&l=ja-JP") else {
             return []
         }
         let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
         try Task.checkCancellation()
         let decoded = try JSONDecoder().decode(AlbumsResponse.self, from: resp.data)
-        return decoded.data?.compactMap { $0.toAlbum() } ?? []
+        return decoded.data?.compactMap { $0.toAlbum(storefront: storefront) } ?? []
     }
 }
 
@@ -104,8 +109,10 @@ private struct TopSongsResponse: Decodable {
         let attributes: SongAttributes?
         let relationships: SongRelationships?
 
-        func toTrack(fallbackArtistID: String) -> Track? {
+        func toTrack(fallbackArtistID: String, storefront: String) -> Track? {
             guard let attrs = attributes else { return nil }
+            _ = storefront // 現状 Track には storefront を持たせていないため未使用。
+                           // 将来 Track 自体にも storefront を埋め込みたくなったらここを使う。
             let artworkURL = attrs.artwork.flatMap { art -> URL? in
                 let urlStr = art.url
                     .replacingOccurrences(of: "{w}", with: "300")
@@ -157,7 +164,7 @@ private struct AlbumsResponse: Decodable {
         let id: String
         let attributes: AlbumAttributes?
 
-        func toAlbum() -> Album? {
+        func toAlbum(storefront: String) -> Album? {
             guard let attrs = attributes else { return nil }
             let artworkURL = attrs.artwork.flatMap { art -> URL? in
                 let urlStr = art.url
@@ -165,7 +172,13 @@ private struct AlbumsResponse: Decodable {
                     .replacingOccurrences(of: "{h}", with: "300")
                 return URL(string: urlStr)
             }
-            return Album(id: id, title: attrs.name, artistName: attrs.artistName, artworkURL: artworkURL)
+            return Album(
+                id: id,
+                title: attrs.name,
+                artistName: attrs.artistName,
+                artworkURL: artworkURL,
+                storefront: storefront
+            )
         }
     }
 
