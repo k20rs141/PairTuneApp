@@ -1,6 +1,7 @@
 import SwiftUI
 import Supabase
 import PhotosUI
+import UIKit
 
 // MARK: - ProfileView (v0.4 プロフィール / 設定画面)
 //
@@ -47,6 +48,7 @@ struct ProfileView: View {
     @State private var isDeleting = false
     @State private var showUnpairDialog = false
     @State private var isEndingPair = false
+    @State private var toastMessage: String?
 
     @FocusState private var nameFocused: Bool
 
@@ -80,6 +82,19 @@ struct ProfileView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
                 .padding(.bottom, 60)
+            }
+
+            // Toast overlay (コードコピー時の確認用)
+            if let msg = toastMessage {
+                VStack {
+                    Spacer()
+                    ToastView(message: msg)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .padding(.bottom, 90)
+                }
+                .animation(.easeOut(duration: 0.25), value: toastMessage != nil)
+                .allowsHitTesting(false)
+                .zIndex(110)
             }
 
             if showUnpairDialog {
@@ -243,6 +258,17 @@ struct ProfileView: View {
     private func commitName() {
         editingName = false
         Task { await authViewModel.updateDisplayName(displayName) }
+    }
+
+    /// マイルームコードをクリップボードへコピーし、haptic + トーストで確認表示する。
+    private func copyMyRoomCode() {
+        guard let code = sharingPairingCode, !code.isEmpty else { return }
+        UIPasteboard.general.string = code
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation { toastMessage = "コードをコピーしました" }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation { toastMessage = nil }
+        }
     }
 
     private func initialsOf(_ name: String) -> String {
@@ -574,7 +600,8 @@ struct ProfileView: View {
                 label: "マイルームコード",
                 value: sharingPairingCode ?? "------",
                 valueIsMono: true,
-                valueColor: .pairtunePrimary
+                valueColor: .pairtunePrimary,
+                onCopy: (sharingPairingCode?.isEmpty == false) ? { copyMyRoomCode() } : nil
             )
             SettingsDivider()
             SettingsLinkRow(label: "サインアウト", style: .subtle) {
@@ -729,6 +756,9 @@ private struct SettingsRow: View {
     let value: String
     var valueIsMono: Bool = false
     var valueColor: Color = Color(hex: "7A7588")
+    /// 設定値の右側に doc.on.doc コピーボタンを表示する場合のハンドラ。
+    /// nil の時はボタン非表示。
+    var onCopy: (() -> Void)? = nil
 
     var body: some View {
         HStack {
@@ -741,6 +771,17 @@ private struct SettingsRow: View {
                 .font(.system(size: valueIsMono ? 12.5 : 12, design: valueIsMono ? .monospaced : .default))
                 .foregroundColor(valueColor)
                 .tracking(valueIsMono ? 2 : 0.2)
+            if let onCopy {
+                Button(action: onCopy) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.pairtuneTextSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 2)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)

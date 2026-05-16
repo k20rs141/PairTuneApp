@@ -179,7 +179,7 @@ struct RoomView: View {
                 partnerName: roomViewModel.mode == .shared ? partnerName : nil,
                 onSelectTrack: { track in
                     Task { await roomViewModel.addToQueue(track) }
-                    showToast("キューに追加しました · Added to queue")
+                    showToast("キューに追加しました")
                 }
             )
         }
@@ -222,33 +222,37 @@ struct RoomView: View {
 
             Spacer()
 
-            Button {
-                UIPasteboard.general.string = roomViewModel.currentRoom.code
-                showToast("コードをコピーしました · Code copied")
-            } label: {
-                VStack(spacing: 2) {
-                    Text(roomViewModel.currentRoom.code)
-                        .font(.system(size: 17, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white)
-                        .tracking(3.5)
-                    Text("TAP TO COPY")
-                        .font(.system(size: 9.5, weight: .regular))
-                        .foregroundColor(.pairtuneTextTertiary)
-                        .tracking(0.6)
+            // Solo モードのみ pairingCode を表示(相手にシェアするための招待コード)。
+            // Shared モードでは code は内部 UUID で意味を持たないため非表示。
+            if roomViewModel.mode == .solo {
+                Button {
+                    UIPasteboard.general.string = roomViewModel.currentRoom.code
+                    showToast("コードをコピーしました · Code copied")
+                } label: {
+                    VStack(spacing: 2) {
+                        Text(roomViewModel.currentRoom.code)
+                            .font(.system(size: 17, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white)
+                            .tracking(3.5)
+                        Text("TAP TO COPY")
+                            .font(.system(size: 9.5, weight: .regular))
+                            .foregroundColor(.pairtuneTextTertiary)
+                            .tracking(0.6)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                            )
+                    )
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white.opacity(0.04))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-                        )
-                )
-            }
 
-            Spacer()
+                Spacer()
+            }
 
             // ヘッダ右上は share ボタンのみ(キューは playback controls に置く設計 §2.15)。
             FrostedCircleButton(icon: "square.and.arrow.up", size: 38) {

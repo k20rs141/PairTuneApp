@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - HomeView (v0.4 Claude Design v2)
 //
@@ -45,6 +46,8 @@ struct HomeView: View {
 
     private var isPaired: Bool { partnerName != nil }
 
+    @State private var toastMessage: String?
+
     var body: some View {
         ZStack {
             Color.pairtuneBase.ignoresSafeArea()
@@ -74,6 +77,29 @@ struct HomeView: View {
                 Spacer(minLength: 0)
                 ctaStack
             }
+
+            // Toast overlay (コードコピー時の確認用)
+            if let msg = toastMessage {
+                VStack {
+                    Spacer()
+                    ToastView(message: msg)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .padding(.bottom, 130)
+                }
+                .animation(.easeOut(duration: 0.25), value: toastMessage != nil)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    /// pairingCode をクリップボードへコピーし、haptic + トーストで確認表示する。
+    private func copyPairingCode() {
+        guard let code = pairingCode, !code.isEmpty else { return }
+        UIPasteboard.general.string = code
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation { toastMessage = "コードをコピーしました" }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation { toastMessage = nil }
         }
     }
 
@@ -336,8 +362,8 @@ struct HomeView: View {
                     .tracking(5)
             }
             Spacer(minLength: 0)
-            Button(action: onShareCode) {
-                Image(systemName: "square.and.arrow.up")
+            Button(action: copyPairingCode) {
+                Image(systemName: "doc.on.doc")
                     .font(.system(size: 15))
                     .foregroundColor(.pairtuneTextSecondary)
                     .frame(width: 38, height: 38)
