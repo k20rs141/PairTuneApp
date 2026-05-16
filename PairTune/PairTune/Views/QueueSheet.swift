@@ -21,6 +21,7 @@ struct QueueSheet: View {
     var onDismiss: () -> Void
 
     @State private var contextTrack: Track?
+    @State private var queueEditMode: EditMode = .inactive
 
     private var isSolo: Bool { roomViewModel.mode == .solo }
 
@@ -240,12 +241,47 @@ struct QueueSheet: View {
 
     @ViewBuilder
     private var upNextSection: some View {
-        sectionHeader(
-            "次に再生",
-            "Up next · \(roomViewModel.queue.items.count) 曲",
-            action: onAddTap,
-            actionLabel: "追加"
-        )
+        // ヘッダー: 通常時は「並び替え」+「追加」、編集中は「完了」のみ
+        HStack(spacing: 0) {
+            Text("次に再生")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+                .tracking(0.3)
+            Text(" · Up next · \(roomViewModel.queue.items.count) 曲")
+                .font(.system(size: 10.5))
+                .foregroundColor(Color(hex: "5A5566"))
+                .tracking(0.6)
+            Spacer()
+            if queueEditMode == .active {
+                Button("完了") {
+                    withAnimation { queueEditMode = .inactive }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.pairtunePrimary)
+            } else {
+                HStack(spacing: 14) {
+                    Button("並び替え") {
+                        withAnimation { queueEditMode = .active }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color(hex: "7A7588"))
+
+                    Button(action: onAddTap) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("追加")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.pairtunePrimary)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
 
         if roomViewModel.queue.items.isEmpty {
             VStack(spacing: 6) {
@@ -269,20 +305,21 @@ struct QueueSheet: View {
             )
             .padding(.horizontal, 18)
         } else {
-            // List + onMove + EditMode.active で drag-to-reorder を有効化。
-            // 背景は scrollContentBackground(.hidden) と listRowBackground(.clear) で
-            // 完全に透明化してデザインを保つ。
+            // 通常モード: .swipeActions でスワイプ削除ボタンを表示
+            // 並び替えモード: EditMode.active で drag handle を表示、.swipeActions は非表示(iOS仕様)
             List {
                 ForEach(roomViewModel.queue.items) { item in
-                    UpNextRowView(
-                        item: item,
-                        onPlay: { Task { await roomViewModel.playFromQueue(item) } },
-                        onMenu: { contextTrack = item.toTrack() },
-                        onDelete: { Task { await roomViewModel.queue.remove(itemId: item.id) } }
-                    )
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
-                    .listRowSeparator(.hidden)
+                    upNextRow(item: item)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task { await roomViewModel.queue.remove(itemId: item.id) }
+                            } label: {
+                                Label("削除", systemImage: "trash")
+                            }
+                        }
                 }
                 .onMove { from, to in
                     var newItems = roomViewModel.queue.items
@@ -294,8 +331,61 @@ struct QueueSheet: View {
             .scrollContentBackground(.hidden)
             .scrollDisabled(true)
             .frame(height: CGFloat(roomViewModel.queue.items.count) * 64 + 8)
-            .environment(\.editMode, .constant(.active))
+            .environment(\.editMode, $queueEditMode)
         }
+    }
+
+    private func upNextRow(item: QueueItem) -> some View {
+        HStack(spacing: 11) {
+            Button {
+                Task { await roomViewModel.playFromQueue(item) }
+            } label: {
+                HStack(spacing: 11) {
+                    artworkView(
+                        url: item.artworkUrl,
+                        size: 40,
+                        stops: [
+                            .init(color: .pairtunePrimary, location: 0),
+                            .init(color: Color(hex: "4A1D3D"), location: 1),
+                        ]
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.songTitle)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        Text(item.artistName)
+                            .font(.system(size: 11))
+                            .foregroundColor(Color(hex: "7A7588"))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    if let dur = item.durationSeconds {
+                        Text(fmt(dur))
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundColor(Color(hex: "5A5566"))
+                            .monospacedDigit()
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                contextTrack = item.toTrack()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(hex: "5A5566"))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
 
@@ -439,138 +529,6 @@ struct QueueSheet: View {
         case ..<86400:     return "\(elapsed / 3600) 時間前"
         default:           return "\(elapsed / 86400) 日前"
         }
-    }
-}
-
-// MARK: - Up-next row with custom swipe-to-delete
-//
-// List の EditMode.active 下では .swipeActions がシステムに抑制されるため、
-// ZStack + simultaneousGesture(DragGesture) で独自実装する。
-// row content がスライドして背後の削除ボタンを露出させる標準 iOS スワイプ UI。
-
-private struct UpNextRowView: View {
-    let item: QueueItem
-    let onPlay: () -> Void
-    let onMenu: () -> Void
-    let onDelete: () -> Void
-
-    @State private var offsetX: CGFloat = 0
-    private static let deleteButtonWidth: CGFloat = 72
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            // 削除ボタン (固定・row の背後)
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) { offsetX = 0 }
-                onDelete()
-            } label: {
-                VStack(spacing: 3) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 16, weight: .medium))
-                    Text("削除")
-                        .font(.system(size: 10.5, weight: .medium))
-                }
-                .foregroundColor(.white)
-                .frame(width: Self.deleteButtonWidth)
-                .frame(maxHeight: .infinity)
-            }
-            .background(Color(hex: "FF3B30"))
-
-            // row content (スワイプでスライドして削除ボタンを露出)
-            rowContent
-                .background(Color.pairtuneSurface)
-                .offset(x: offsetX)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 8, coordinateSpace: .local)
-                        .onChanged { value in
-                            let dx = value.translation.width
-                            let dy = value.translation.height
-                            // 斜め・縦スクロールは無視して水平スワイプのみ処理
-                            guard abs(dx) > abs(dy) * 0.8 else { return }
-                            if dx < 0 {
-                                offsetX = max(-Self.deleteButtonWidth, dx)
-                            } else if offsetX < 0 {
-                                offsetX = min(0, offsetX + dx)
-                            }
-                        }
-                        .onEnded { value in
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                offsetX = offsetX < -(Self.deleteButtonWidth * 0.4) ? -Self.deleteButtonWidth : 0
-                            }
-                        }
-                )
-        }
-        .clipped()
-    }
-
-    private var rowContent: some View {
-        HStack(spacing: 11) {
-            Button(action: onPlay) {
-                HStack(spacing: 11) {
-                    artwork
-                        .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.songTitle)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Text(item.artistName)
-                            .font(.system(size: 11))
-                            .foregroundColor(Color(hex: "7A7588"))
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    if let dur = item.durationSeconds {
-                        Text(fmt(dur))
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundColor(Color(hex: "5A5566"))
-                            .monospacedDigit()
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button(action: onMenu) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color(hex: "5A5566"))
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private var artwork: some View {
-        let stops: [Gradient.Stop] = [
-            .init(color: .pairtunePrimary, location: 0),
-            .init(color: Color(hex: "4A1D3D"), location: 1),
-        ]
-        Group {
-            if let urlStr = item.artworkUrl, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    default:
-                        LinearGradient(stops: stops, startPoint: .topLeading, endPoint: .bottomTrailing)
-                    }
-                }
-            } else {
-                LinearGradient(stops: stops, startPoint: .topLeading, endPoint: .bottomTrailing)
-            }
-        }
-        .frame(width: 40, height: 40)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
-        )
     }
 }
 
