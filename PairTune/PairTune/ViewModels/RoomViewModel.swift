@@ -393,9 +393,25 @@ final class RoomViewModel: Identifiable {
         currentTrack = track
         isPaused = false
 
+        let songId = track.id
+        activeSongId = songId
+        // 重要: load 開始前に lastLocalActionAt をスタンプする。これにより、
+        // load 中(数百 ms~)に届く相手の旧曲 play_state を applyPlayState の grace
+        // window で弾けるようになり、新旧曲のリロード往復を防げる。
+        lastLocalActionAt = Date()
+
+        // Shared: load 前に「曲を切り替える」シグナルを即時相手へ送る。
+        // 2 秒間隔の play_state broadcast loop と musicService.load の数百 ms~ の
+        // 間に、相手側がまだ activeSongId を更新できておらず旧曲を broadcast し続けて
+        // しまう過渡状態を最小化する目的。
+        if mode == .shared {
+            try? await roomService.updateCurrentSong(roomId: currentRoom.id, songId: songId)
+            let earlyEvent = PlayEvent(type: .play, songId: songId, playbackTime: 0)
+            await channelManager.broadcast(event: "play_event", message: earlyEvent)
+            await channelManager.broadcast(event: "play_event", message: earlyEvent)
+        }
+
         do {
-            let songId = track.id
-            activeSongId = songId
             try await musicService.load(songId: songId, at: 0)
 
             // duration だけ MusicKit から拾い、その他(title/artist/album/artwork)は
@@ -412,11 +428,9 @@ final class RoomViewModel: Identifiable {
                 // Solo: Realtime なし。30秒タイマーをリスタートして履歴記録を予約。
                 startHistoryTimer(for: currentTrack ?? track)
             } else {
-                // Shared: last-write-wins タイムスタンプを更新 → DB 保存 → PlayEvent 2 連投
+                // Shared: load 完了後に正確な playback time で再送し、相手のドリフト補正を促す。
                 lastLocalActionAt = Date()
-                try? await roomService.updateCurrentSong(roomId: currentRoom.id, songId: songId)
                 let event = PlayEvent(type: .play, songId: songId, playbackTime: musicService.currentTime())
-                await channelManager.broadcast(event: "play_event", message: event)
                 await channelManager.broadcast(event: "play_event", message: event)
                 // 30秒後に履歴記録
                 startHistoryTimer(for: currentTrack ?? track)
@@ -588,6 +602,16 @@ final class RoomViewModel: Identifiable {
         if let mine = lastLocalActionAt,
            Date().timeIntervalSince(mine) < 1.0,
            state.hostTimestampMs < Int64(mine.timeIntervalSince1970 * 1000) {
+            return
+        }
+
+        // 直近 3 秒以内に自分が曲切替を起こしていた場合、相手が古い songId を
+        // broadcast していたら無視する。相手側の 2 秒 broadcast loop と自分の
+        // play_event 伝搬の入れ違いで起こる「新旧曲のリロード往復」を防ぐ。
+        if let mine = lastLocalActionAt,
+           Date().timeIntervalSince(mine) < 3.0,
+           !state.songId.isEmpty,
+           state.songId != activeSongId {
             return
         }
 
