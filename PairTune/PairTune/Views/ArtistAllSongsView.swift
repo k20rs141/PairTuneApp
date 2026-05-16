@@ -59,9 +59,15 @@ final class ArtistAllSongsViewModel {
     }
 
     /// Apple Music の `/artists/{id}/songs` は limit 最大 20 のため、offset を進めて
-    /// 数回に分けて取得する(最大 6 ページ = 120 曲、または取得件数 < 20 で打ち切り)。
+    /// 数回に分けて取得する(最大 6 ページ = 120 曲)。
+    /// - 末尾(取得件数 < pageSize)で打ち切り
+    /// - 空ページ(0 件)で打ち切り
+    /// - 後続ページのエラー(offset 範囲外による 400 等)はその時点までの結果を返す
+    /// - 1 件も取れていない時はエラーを伝搬(UI で「読み込みできません」を出す)
+    /// - storefront は jp 固定: JP アーティストの artistID は jp カタログでのみ参照可能で、
+    ///   端末ロケールが US 等だと 404 になるため。
     private static func fetchAllSongs(artistID: String) async throws -> [Track] {
-        let storefront = Locale.current.region?.identifier.lowercased() ?? "jp"
+        let storefront = "jp"
         let pageSize = 20
         let maxPages = 6
         var collected: [Track] = []
@@ -70,12 +76,25 @@ final class ArtistAllSongsViewModel {
             guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/songs?limit=\(pageSize)&offset=\(offset)&l=ja-JP&include=albums,artists") else {
                 break
             }
-            let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
-            try Task.checkCancellation()
-            let decoded = try JSONDecoder().decode(SongsResponse.self, from: resp.data)
-            let pageTracks = decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID) } ?? []
-            collected.append(contentsOf: pageTracks)
-            if pageTracks.count < pageSize { break }   // 末尾に達した
+            do {
+                let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+                try Task.checkCancellation()
+                let decoded = try JSONDecoder().decode(SongsResponse.self, from: resp.data)
+                let pageTracks = decoded.data?.compactMap { $0.toTrack(fallbackArtistID: artistID) } ?? []
+                if pageTracks.isEmpty { break }
+                collected.append(contentsOf: pageTracks)
+                if pageTracks.count < pageSize { break }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let urlErr as URLError where urlErr.code == .cancelled {
+                throw CancellationError()
+            } catch {
+                // 既に取得済みのページがあれば打ち切って返す(offset 範囲外の 400 等を吸収)。
+                // 1 件も取れていない時のみエラーを上に伝搬する。
+                print("[ArtistAllSongsViewModel] page \(page) (offset \(offset)) error:", error)
+                if collected.isEmpty { throw error }
+                break
+            }
         }
         return collected
     }
