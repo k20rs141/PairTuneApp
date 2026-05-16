@@ -8,6 +8,9 @@ final class ArtistDetailViewModel {
     let artist: Artist
     var topSongs: [Track] = []
     var albums: [Album] = []
+    var singles: [Album] = []
+    var liveAlbums: [Album] = []
+    var featuredPlaylists: [Playlist] = []
     var isLoading: Bool = false
     var loadError: String?
 
@@ -25,13 +28,24 @@ final class ArtistDetailViewModel {
         loadError = nil
         loadTask?.cancel()
         loadTask = Task { [artistID = artist.id, storefront = artist.storefront] in
+            // songs/albums は失敗時にエラー表示するためスロー。
+            // singles/liveAlbums/playlists はオプショナルなのでエラーを吸収し空配列を返す。
             async let songsResult: [Track] = Self.fetchTopSongs(artistID: artistID, storefront: storefront)
             async let albumsResult: [Album] = Self.fetchAlbums(artistID: artistID, storefront: storefront)
+            async let singlesResult: [Album] = Self.fetchSingles(artistID: artistID, storefront: storefront)
+            async let liveResult: [Album] = Self.fetchLiveAlbums(artistID: artistID, storefront: storefront)
+            async let playlistsResult: [Playlist] = Self.fetchFeaturedPlaylists(artistID: artistID, storefront: storefront)
             do {
                 let (songs, albums) = try await (songsResult, albumsResult)
                 guard !Task.isCancelled else { return }
+                let singles = await singlesResult
+                let live = await liveResult
+                let playlists = await playlistsResult
                 self.topSongs = songs
                 self.albums = albums
+                self.singles = singles
+                self.liveAlbums = live
+                self.featuredPlaylists = playlists
                 self.isLoading = false
             } catch is CancellationError {
                 return
@@ -96,6 +110,69 @@ final class ArtistDetailViewModel {
         try Task.checkCancellation()
         let decoded = try JSONDecoder().decode(AlbumsResponse.self, from: resp.data)
         return decoded.data?.compactMap { $0.toAlbum(storefront: storefront) } ?? []
+    }
+
+    /// view/singles — 失敗時は空配列を返しエラーを伝搬しない(セクションを非表示にするだけ)。
+    private static func fetchSingles(artistID: String, storefront explicit: String?) async -> [Album] {
+        let storefront = resolveStorefront(explicit)
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/view/singles?limit=20&l=ja-JP") else {
+            return []
+        }
+        do {
+            let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            try Task.checkCancellation()
+            let decoded = try JSONDecoder().decode(AlbumsResponse.self, from: resp.data)
+            return decoded.data?.compactMap { $0.toAlbum(storefront: storefront) } ?? []
+        } catch is CancellationError {
+            return []
+        } catch let urlErr as URLError where urlErr.code == .cancelled {
+            return []
+        } catch {
+            print("[ArtistDetailViewModel] fetchSingles error (ignored):", error.localizedDescription)
+            return []
+        }
+    }
+
+    /// view/live-albums — 失敗時は空配列を返す。
+    private static func fetchLiveAlbums(artistID: String, storefront explicit: String?) async -> [Album] {
+        let storefront = resolveStorefront(explicit)
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/view/live-albums?limit=20&l=ja-JP") else {
+            return []
+        }
+        do {
+            let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            try Task.checkCancellation()
+            let decoded = try JSONDecoder().decode(AlbumsResponse.self, from: resp.data)
+            return decoded.data?.compactMap { $0.toAlbum(storefront: storefront) } ?? []
+        } catch is CancellationError {
+            return []
+        } catch let urlErr as URLError where urlErr.code == .cancelled {
+            return []
+        } catch {
+            print("[ArtistDetailViewModel] fetchLiveAlbums error (ignored):", error.localizedDescription)
+            return []
+        }
+    }
+
+    /// view/featured-playlists — 失敗時は空配列を返す。
+    private static func fetchFeaturedPlaylists(artistID: String, storefront explicit: String?) async -> [Playlist] {
+        let storefront = resolveStorefront(explicit)
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/artists/\(artistID)/view/featured-playlists?limit=20&l=ja-JP") else {
+            return []
+        }
+        do {
+            let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+            try Task.checkCancellation()
+            let decoded = try JSONDecoder().decode(FeaturedPlaylistsResponse.self, from: resp.data)
+            return decoded.data?.compactMap { $0.toPlaylist(storefront: storefront) } ?? []
+        } catch is CancellationError {
+            return []
+        } catch let urlErr as URLError where urlErr.code == .cancelled {
+            return []
+        } catch {
+            print("[ArtistDetailViewModel] fetchFeaturedPlaylists error (ignored):", error.localizedDescription)
+            return []
+        }
     }
 }
 
@@ -191,4 +268,37 @@ private struct AlbumsResponse: Decodable {
 
 private struct ArtworkInfo: Decodable {
     let url: String
+}
+
+// MARK: - Featured playlists response
+
+private struct FeaturedPlaylistsResponse: Decodable {
+    let data: [PlaylistResource]?
+
+    struct PlaylistResource: Decodable {
+        let id: String
+        let attributes: PlaylistAttributes?
+
+        func toPlaylist(storefront: String) -> Playlist? {
+            guard let attrs = attributes else { return nil }
+            let artworkURL = attrs.artwork.flatMap { art -> URL? in
+                URL(string: art.url
+                    .replacingOccurrences(of: "{w}", with: "300")
+                    .replacingOccurrences(of: "{h}", with: "300"))
+            }
+            return Playlist(
+                id: id,
+                title: attrs.name,
+                curatorName: attrs.curatorName ?? "",
+                artworkURL: artworkURL,
+                storefront: storefront
+            )
+        }
+    }
+
+    struct PlaylistAttributes: Decodable {
+        let name: String
+        let curatorName: String?
+        let artwork: ArtworkInfo?
+    }
 }

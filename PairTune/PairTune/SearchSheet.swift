@@ -77,9 +77,29 @@ struct SearchSheet: View {
                     onSelectAlbum: { album in
                         navPath.append(album)
                     },
+                    onSelectPlaylist: { playlist in
+                        navPath.append(playlist)
+                    },
                     onSendArtistToPartner: partnerName != nil ? {
                         isPresented = false
                     } : nil
+                )
+            }
+            .navigationDestination(for: Playlist.self) { playlist in
+                AlbumDetailView(
+                    viewModel: AlbumDetailViewModel(playlist: playlist, roomViewModel: viewModel.roomViewModel),
+                    partnerName: partnerName,
+                    onSelectTrack: { track in
+                        isPresented = false
+                        if let onSelectTrack {
+                            onSelectTrack(track)
+                        } else {
+                            viewModel.selectSong(track)
+                        }
+                    },
+                    onShowArtist: { artist in
+                        navPath.append(artist)
+                    }
                 )
             }
             .navigationDestination(for: Album.self) { album in
@@ -106,6 +126,7 @@ struct SearchSheet: View {
             query = ""
             viewModel.songs = []
             viewModel.artists = []
+            viewModel.playlists = []
             viewModel.isSearching = false
             // 検索前画面の最近履歴・おすすめを読み込む(SoloMode/Shared 自動判定)
             Task { await viewModel.loadEmptyStateData() }
@@ -195,7 +216,7 @@ struct SearchSheet: View {
                         ForEach(0..<5, id: \.self) { _ in
                             SkeletonRow()
                         }
-                    } else if viewModel.songs.isEmpty && viewModel.artists.isEmpty && !query.isEmpty {
+                    } else if viewModel.songs.isEmpty && viewModel.artists.isEmpty && viewModel.playlists.isEmpty && !query.isEmpty {
                         EmptyStateView(
                             kind: .noResults,
                             descriptionOverride: "「\(query)」に一致する曲は見つかりませんでした。",
@@ -274,6 +295,29 @@ struct SearchSheet: View {
                                     }
                                 )
                             }
+                        }
+
+                        if !viewModel.playlists.isEmpty {
+                            if !viewModel.artists.isEmpty || !viewModel.songs.isEmpty {
+                                Divider()
+                                    .background(Color.pairtuneHairline)
+                                    .padding(.horizontal, 18)
+                                    .padding(.bottom, 14)
+                            }
+                            sectionHeader("プレイリスト · Playlists")
+                                .padding(.bottom, 12)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(alignment: .top, spacing: 16) {
+                                    ForEach(viewModel.playlists) { playlist in
+                                        NavigationLink(value: playlist) {
+                                            SearchPlaylistCell(playlist: playlist)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 18)
+                            }
+                            .padding(.bottom, 18)
                         }
                     }
                 }
@@ -387,6 +431,64 @@ private struct ArtistAvatarCell: View {
         )
         .overlay(
             Image(systemName: "person.fill")
+                .font(.system(size: 28))
+                .foregroundColor(.white.opacity(0.7))
+        )
+    }
+}
+
+// MARK: - Playlist cell (search results, same width as ArtistAvatarCell)
+
+private struct SearchPlaylistCell: View {
+    let playlist: Playlist
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Group {
+                if let url = playlist.artworkURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        default:
+                            placeholder
+                        }
+                    }
+                } else {
+                    placeholder
+                }
+            }
+            .frame(width: 80, height: 80)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.35), radius: 5, y: 2)
+
+            VStack(spacing: 2) {
+                Text(playlist.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .frame(width: 88)
+                if !playlist.curatorName.isEmpty {
+                    Text(playlist.curatorName)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.pairtuneTextSecondary)
+                        .lineLimit(1)
+                        .frame(width: 88)
+                }
+            }
+        }
+    }
+
+    private var placeholder: some View {
+        LinearGradient(
+            colors: [Color.pairtuneSecondary.opacity(0.55), Color(hex: "4A1D3D")],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay(
+            Image(systemName: "music.note.list")
                 .font(.system(size: 28))
                 .foregroundColor(.white.opacity(0.7))
         )

@@ -17,4 +17,14 @@ struct Album: Identifiable, Equatable, Hashable {
     let artworkURL: URL?
     /// この album.id が取得された Apple Music のストアフロント。Artist と同じ理由で保持。
     var storefront: String? = nil
+    /// true のとき AlbumDetailViewModel はプレイリストエンドポイントを使う。
+    var isPlaylist: Bool = false
+}
+
+struct Playlist: Identifiable, Equatable, Hashable {
+    let id: String
+    let title: String
+    let curatorName: String
+    let artworkURL: URL?
+    var storefront: String? = nil
 }

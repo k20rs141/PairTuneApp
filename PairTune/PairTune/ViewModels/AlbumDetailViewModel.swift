@@ -22,6 +22,20 @@ final class AlbumDetailViewModel {
     init(album: Album, roomViewModel: RoomViewModel) {
         self.album = album
         self.roomViewModel = roomViewModel
+        if album.isPlaylist { self.kindLabel = "Playlist" }
+    }
+
+    init(playlist: Playlist, roomViewModel: RoomViewModel) {
+        self.album = Album(
+            id: playlist.id,
+            title: playlist.title,
+            artistName: playlist.curatorName,
+            artworkURL: playlist.artworkURL,
+            storefront: playlist.storefront,
+            isPlaylist: true
+        )
+        self.roomViewModel = roomViewModel
+        self.kindLabel = "Playlist"
     }
 
     func load() {
@@ -29,14 +43,19 @@ final class AlbumDetailViewModel {
         isLoading = true
         loadError = nil
         loadTask?.cancel()
-        loadTask = Task { [albumID = album.id, storefront = album.storefront] in
+        loadTask = Task { [albumID = album.id, storefront = album.storefront, isPlaylist = album.isPlaylist] in
             do {
-                let detail = try await Self.fetchAlbumDetail(albumID: albumID, storefront: storefront)
+                let detail: AlbumDetail
+                if isPlaylist {
+                    detail = try await Self.fetchPlaylistDetail(playlistID: albumID, storefront: storefront)
+                } else {
+                    detail = try await Self.fetchAlbumDetail(albumID: albumID, storefront: storefront)
+                }
                 guard !Task.isCancelled else { return }
                 self.tracks = detail.tracks
                 self.totalDurationSeconds = detail.tracks.reduce(0) { $0 + $1.duration }
                 self.releaseDate = detail.releaseDate
-                self.kindLabel = detail.isSingle ? "Single" : (detail.isEP ? "EP" : "Album")
+                self.kindLabel = isPlaylist ? "Playlist" : (detail.isSingle ? "Single" : (detail.isEP ? "EP" : "Album"))
                 self.albumArtistId = detail.albumArtistId
                 self.isLoading = false
             } catch is CancellationError {
@@ -85,6 +104,28 @@ final class AlbumDetailViewModel {
         let isSingle: Bool
         let isEP: Bool
         let albumArtistId: String?
+    }
+
+    private static func fetchPlaylistDetail(playlistID: String, storefront explicit: String?) async throws -> AlbumDetail {
+        let storefront = explicit ?? Locale.current.region?.identifier.lowercased() ?? "jp"
+        guard let url = URL(string: "https://api.music.apple.com/v1/catalog/\(storefront)/playlists/\(playlistID)?l=ja-JP&include=tracks") else {
+            return AlbumDetail(tracks: [], releaseDate: nil, isSingle: false, isEP: false, albumArtistId: nil)
+        }
+        let resp = try await MusicDataRequest(urlRequest: URLRequest(url: url)).response()
+        try Task.checkCancellation()
+        let decoded = try JSONDecoder().decode(PlaylistDetailResponse.self, from: resp.data)
+        guard let resource = decoded.data?.first else {
+            return AlbumDetail(tracks: [], releaseDate: nil, isSingle: false, isEP: false, albumArtistId: nil)
+        }
+        let trackResources = resource.relationships?.tracks?.data ?? []
+        let tracks = trackResources.compactMap { $0.toTrack() }
+        return AlbumDetail(
+            tracks: tracks,
+            releaseDate: resource.attributes?.lastModifiedDate,
+            isSingle: false,
+            isEP: false,
+            albumArtistId: nil
+        )
     }
 
     private static func fetchAlbumDetail(albumID: String, storefront explicit: String?) async throws -> AlbumDetail {
@@ -186,6 +227,76 @@ private struct AlbumResponse: Decodable {
     }
 
     struct TrackAttributes: Decodable {
+        let name: String
+        let artistName: String
+        let albumName: String?
+        let durationInMillis: Int?
+        let artwork: ArtworkInfo?
+    }
+
+    struct ArtworkInfo: Decodable {
+        let url: String
+    }
+}
+
+// MARK: - Playlist detail response
+
+private struct PlaylistDetailResponse: Decodable {
+    let data: [PlaylistResource]?
+
+    struct PlaylistResource: Decodable {
+        let id: String
+        let attributes: PlaylistAttributes?
+        let relationships: PlaylistRelationships?
+    }
+
+    struct PlaylistAttributes: Decodable {
+        let name: String
+        let curatorName: String?
+        let lastModifiedDate: String?
+    }
+
+    struct PlaylistRelationships: Decodable {
+        let tracks: TracksRel?
+    }
+
+    struct TracksRel: Decodable {
+        let data: [SongResource]?
+    }
+
+    struct SongResource: Decodable {
+        let id: String
+        let type: String?
+        let attributes: SongAttributes?
+
+        func toTrack() -> Track? {
+            // music-videos など songs 以外はスキップ
+            if let t = type, t != "songs" { return nil }
+            guard let attrs = attributes else { return nil }
+            let artworkURL = attrs.artwork.flatMap { art -> URL? in
+                URL(string: art.url
+                    .replacingOccurrences(of: "{w}", with: "600")
+                    .replacingOccurrences(of: "{h}", with: "600"))
+            }
+            return Track(
+                id: id,
+                title: attrs.name,
+                artist: attrs.artistName,
+                album: attrs.albumName ?? "",
+                duration: (attrs.durationInMillis ?? 0) / 1000,
+                gradientStops: [
+                    .init(color: .pairtuneSecondary, location: 0.0),
+                    .init(color: Color(hex: "2E0E2A"), location: 1.0),
+                ],
+                dominant: .pairtuneSecondary,
+                artworkURL: artworkURL,
+                albumId: nil,
+                artistId: nil
+            )
+        }
+    }
+
+    struct SongAttributes: Decodable {
         let name: String
         let artistName: String
         let albumName: String?

@@ -11,6 +11,7 @@ final class SearchViewModel: Identifiable {
 
     var songs: [Track] = []
     var artists: [Artist] = []
+    var playlists: [Playlist] = []
     var isSearching: Bool = false
     var searchError: String?
     var subscriptionMissing: Bool = false
@@ -158,6 +159,7 @@ final class SearchViewModel: Identifiable {
         guard !text.isEmpty else {
             songs = []
             artists = []
+            playlists = []
             isSearching = false
             isOffline = false
             searchError = subscriptionMissing ? "Apple Music の契約が必要です" : nil
@@ -240,7 +242,7 @@ final class SearchViewModel: Identifiable {
         components.path = "/v1/catalog/\(storefront)/search"
         components.queryItems = [
             URLQueryItem(name: "term", value: query),
-            URLQueryItem(name: "types", value: "songs,artists"),
+            URLQueryItem(name: "types", value: "songs,artists,playlists"),
             URLQueryItem(name: "limit", value: "20"),
             URLQueryItem(name: "l", value: "ja-JP"),
             URLQueryItem(name: "include[songs]", value: "albums,artists"),
@@ -269,6 +271,11 @@ final class SearchViewModel: Identifiable {
                 a?.storefront = storefront
                 return a
             } ?? []
+            playlists = decoded.results.playlists?.data.compactMap { resource in
+                var p = resource.toPlaylist()
+                p?.storefront = storefront
+                return p
+            } ?? []
             searchError = nil
             // 履歴には保存しない。確定(TextField .onSubmit)時のみ submitSearch() で追加する。
         } catch is CancellationError {
@@ -279,6 +286,7 @@ final class SearchViewModel: Identifiable {
             print("[SearchViewModel] search error:", error)
             songs = []
             artists = []
+            playlists = []
             if let urlErr = error as? URLError, isOfflineCode(urlErr.code) {
                 isOffline = true
                 searchError = nil
@@ -312,6 +320,7 @@ private struct AppleMusicSearchResponse: Decodable {
     struct Results: Decodable {
         let songs: Songs?
         let artists: Artists?
+        let playlists: Playlists?
     }
 
     struct Songs: Decodable {
@@ -320,6 +329,10 @@ private struct AppleMusicSearchResponse: Decodable {
 
     struct Artists: Decodable {
         let data: [ArtistResource]
+    }
+
+    struct Playlists: Decodable {
+        let data: [PlaylistResource]
     }
 
     struct SongResource: Decodable {
@@ -390,6 +403,32 @@ private struct AppleMusicSearchResponse: Decodable {
 
     struct ArtistAttributes: Decodable {
         let name: String
+        let artwork: ArtworkInfo?
+    }
+
+    struct PlaylistResource: Decodable {
+        let id: String
+        let attributes: PlaylistAttributes?
+
+        func toPlaylist() -> Playlist? {
+            guard let attrs = attributes else { return nil }
+            let artworkURL = attrs.artwork.flatMap { art -> URL? in
+                URL(string: art.url
+                    .replacingOccurrences(of: "{w}", with: "300")
+                    .replacingOccurrences(of: "{h}", with: "300"))
+            }
+            return Playlist(
+                id: id,
+                title: attrs.name,
+                curatorName: attrs.curatorName ?? "",
+                artworkURL: artworkURL
+            )
+        }
+    }
+
+    struct PlaylistAttributes: Decodable {
+        let name: String
+        let curatorName: String?
         let artwork: ArtworkInfo?
     }
 

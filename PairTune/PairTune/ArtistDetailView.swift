@@ -15,6 +15,7 @@ struct ArtistDetailView: View {
     var partnerName: String?
     var onSelectTrack: (Track) -> Void
     var onSelectAlbum: ((Album) -> Void)? = nil
+    var onSelectPlaylist: ((Playlist) -> Void)? = nil
     var onSendArtistToPartner: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -128,6 +129,60 @@ struct ArtistDetailView: View {
                                         onSelectAlbum?(album)
                                     } label: {
                                         AlbumCardView(album: album)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 18)
+                        }
+                    }
+
+                    if !viewModel.singles.isEmpty {
+                        sectionHeader("シングル＆EP", "SINGLES & EPS")
+                            .padding(.top, 22)
+                            .padding(.bottom, 12)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(viewModel.singles) { album in
+                                    Button { onSelectAlbum?(album) } label: {
+                                        AlbumCardView(album: album)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 18)
+                        }
+                    }
+
+                    if !viewModel.liveAlbums.isEmpty {
+                        sectionHeader("ライブアルバム", "LIVE ALBUMS")
+                            .padding(.top, 22)
+                            .padding(.bottom, 12)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(viewModel.liveAlbums) { album in
+                                    Button { onSelectAlbum?(album) } label: {
+                                        AlbumCardView(album: album)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 18)
+                        }
+                    }
+
+                    if !viewModel.featuredPlaylists.isEmpty {
+                        sectionHeader("プレイリスト", "PLAYLISTS")
+                            .padding(.top, 22)
+                            .padding(.bottom, 12)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(viewModel.featuredPlaylists) { playlist in
+                                    Button { onSelectPlaylist?(playlist) } label: {
+                                        PlaylistCardView(playlist: playlist)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -572,6 +627,64 @@ private struct ArtistTrackRow: View {
                 .padding(.leading, 68)
         }
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Playlist card (horizontal scroll, same dimensions as AlbumCardView)
+
+private struct PlaylistCardView: View {
+    let playlist: Playlist
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if let url = playlist.artworkURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        default: placeholder
+                        }
+                    }
+                } else {
+                    placeholder
+                }
+            }
+            .frame(width: 140, height: 140)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playlist.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                if !playlist.curatorName.isEmpty {
+                    Text(playlist.curatorName)
+                        .font(.system(size: 11))
+                        .foregroundColor(.pairtuneTextSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 140, alignment: .leading)
+        }
+    }
+
+    private var placeholder: some View {
+        LinearGradient(
+            colors: [Color.pairtuneSecondary.opacity(0.55), Color(hex: "1F1830")],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay(
+            Image(systemName: "music.note.list")
+                .font(.system(size: 30))
+                .foregroundColor(.white.opacity(0.5))
+        )
     }
 }
 
