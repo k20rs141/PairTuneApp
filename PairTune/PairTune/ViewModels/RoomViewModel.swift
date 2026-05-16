@@ -114,6 +114,14 @@ final class RoomViewModel: Identifiable {
     /// 受信 PlayState の hostTimestampMs よりも新しければ、相手の state を無視する。
     private var lastLocalActionAt: Date? = nil
 
+    /// Shared モード入室直後の broadcast 抑制用。enterRoom で Date() を入れて、
+    /// 相手の play_state を最初に 1 回受信するか、joinBroadcastSuppressWindow 秒
+    /// 経過するまでは自分の play_state を送らない(同期前の isPlaying=false 状態が
+    /// 相手に届いて誤って一時停止させてしまう不具合を防ぐ)。
+    private var joinedSharedAt: Date? = nil
+    private var receivedFirstPeerState: Bool = false
+    private static let joinBroadcastSuppressWindow: TimeInterval = 3.0
+
     // Solo / Shared 共通: 30秒履歴タイマー
     private var historyTimerTask: Task<Void, Never>?
 
@@ -206,6 +214,10 @@ final class RoomViewModel: Identifiable {
             displayName: displayName
         )
 
+        // 入室直後の broadcast 抑制を有効化。startHostBroadcast 内で参照される。
+        joinedSharedAt = Date()
+        receivedFirstPeerState = false
+
         startHostBroadcast()   // 自分の状態を 2 秒間隔で送信
         startGuestListeners()  // 相手からの状態・イベントを受信
         // 遅延参加: DB に曲が保存されていれば先読みしておく
@@ -229,6 +241,10 @@ final class RoomViewModel: Identifiable {
             isHost: true,  // M5: 両者対等
             displayName: displayName
         )
+        // 再接続も入室と同じく、相手の play_state を受け取るまで自分の
+        // 古い/同期前の状態を broadcast しない。
+        joinedSharedAt = Date()
+        receivedFirstPeerState = false
         startHostBroadcast()
         startGuestListeners()
     }
@@ -263,6 +279,9 @@ final class RoomViewModel: Identifiable {
 
         await channelManager.retryFromFailure()
         guard case .connected = channelManager.connectionState else { return }
+        // リトライ後も grace window を有効化(同上)
+        joinedSharedAt = Date()
+        receivedFirstPeerState = false
         startHostBroadcast()
         startGuestListeners()
     }
@@ -505,7 +524,7 @@ final class RoomViewModel: Identifiable {
             var seq = 0
             while !Task.isCancelled {
                 guard let self else { return }
-                if !self.activeSongId.isEmpty {
+                if !self.activeSongId.isEmpty && !self.shouldSuppressBroadcast() {
                     let state = PlayState(
                         songId: self.activeSongId,
                         playbackTime: self.musicService.currentTime(),
@@ -520,6 +539,16 @@ final class RoomViewModel: Identifiable {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    /// Shared 入室直後の broadcast 抑制判定。相手の play_state を 1 回受信するか、
+    /// joinBroadcastSuppressWindow 秒経過するまでは true を返す。
+    /// 同期前の自分の `isPlaying=false` 状態が相手に届いて、相手の再生を誤って
+    /// 一時停止させてしまう不具合を防ぐ。
+    private func shouldSuppressBroadcast() -> Bool {
+        guard let joinedAt = joinedSharedAt else { return false }
+        if receivedFirstPeerState { return false }
+        return Date().timeIntervalSince(joinedAt) < Self.joinBroadcastSuppressWindow
     }
 
     // MARK: - Listener setup (Shared モード)
@@ -596,6 +625,12 @@ final class RoomViewModel: Identifiable {
 
     private func applyPlayState(_ state: PlayState) async {
         debugLastSeq = state.seq
+
+        // 相手からの play_state を 1 回受信した時点で broadcast 抑制を解除する
+        // (自分の echo は actorUserId で除外)。
+        if !state.actorUserId.isEmpty, state.actorUserId != myUserId {
+            receivedFirstPeerState = true
+        }
 
         // ── last-write-wins ──
         // 自分が直近 1 秒以内に操作していて、かつ自分の操作の方が新しければ相手の state を無視する。
