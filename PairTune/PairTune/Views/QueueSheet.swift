@@ -330,7 +330,11 @@ struct QueueSheet: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollDisabled(true)
-            .frame(height: CGFloat(roomViewModel.queue.items.count) * 64 + 8)
+            // 1 行の実高さは upNextRow の (artwork 40 + .padding(.vertical, 8)×2) = 56pt。
+            // listRowInsets 上下 0 のため List 側で追加余白は発生しない。以前は 64 を
+            // 使っていたため、行数が増えるほど Up next と Recently played の間に
+            // 余白(8pt × items.count)が積もる不具合があった。
+            .frame(height: CGFloat(roomViewModel.queue.items.count) * 56)
             .environment(\.editMode, $queueEditMode)
         }
     }
