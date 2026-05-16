@@ -274,24 +274,22 @@ struct QueueSheet: View {
             // 完全に透明化してデザインを保つ。
             List {
                 ForEach(roomViewModel.queue.items) { item in
-                    let idx = roomViewModel.queue.items.firstIndex(where: { $0.id == item.id }) ?? 0
-                    upNextRow(item: item, position: idx + 1)
+                    upNextRow(item: item)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
                         .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task { await roomViewModel.queue.remove(itemId: item.id) }
+                            } label: {
+                                Label("削除", systemImage: "trash")
+                            }
+                        }
                 }
                 .onMove { from, to in
                     var newItems = roomViewModel.queue.items
                     newItems.move(fromOffsets: from, toOffset: to)
                     Task { await roomViewModel.queue.reorder(newItems) }
-                }
-                .onDelete { offsets in
-                    Task {
-                        for idx in offsets {
-                            let item = roomViewModel.queue.items[idx]
-                            await roomViewModel.queue.remove(itemId: item.id)
-                        }
-                    }
                 }
             }
             .listStyle(.plain)
@@ -302,23 +300,8 @@ struct QueueSheet: View {
         }
     }
 
-    private func upNextRow(item: QueueItem, position: Int) -> some View {
+    private func upNextRow(item: QueueItem) -> some View {
         HStack(spacing: 11) {
-            // Drag handle (visual only — drag-reorder は MVP では省略)
-            VStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Rectangle()
-                        .fill(Color(hex: "3F3F4A"))
-                        .frame(width: 14, height: 1)
-                }
-            }
-
-            Text("\(position)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(Color(hex: "5A5566"))
-                .frame(width: 14, alignment: .trailing)
-                .monospacedDigit()
-
             Button {
                 Task { await roomViewModel.playFromQueue(item) }
             } label: {
@@ -344,9 +327,6 @@ struct QueueSheet: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    if !isSolo, let added = item.addedBy {
-                        adderAvatar(addedBy: added)
-                    }
                     if let dur = item.durationSeconds {
                         Text(fmt(dur))
                             .font(.system(size: 10.5, design: .monospaced))
@@ -371,34 +351,6 @@ struct QueueSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-    }
-
-    private func adderAvatar(addedBy: String) -> some View {
-        let isMe = addedBy == myUserId
-        let initials = isMe ? "YO" : initialsForPartner()
-        let baseColor = isMe ? Color.pairtunePrimary : Color.pairtuneSecondary
-        return ZStack {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [baseColor, baseColor.opacity(0.66)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(Circle().stroke(Color.black.opacity(0.3), lineWidth: 1))
-            Text(initials)
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundColor(Color(hex: "0A0612"))
-        }
-        .frame(width: 20, height: 20)
-    }
-
-    private func initialsForPartner() -> String {
-        // partnerName の先頭 1 文字を取って大文字 2 文字風に
-        guard let name = partnerName, let first = name.first else { return "PA" }
-        let s = String(first).uppercased()
-        return s + s
     }
 
     // MARK: - Recently played
